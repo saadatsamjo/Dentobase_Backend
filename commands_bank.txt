@@ -1,0 +1,147 @@
+PYTHON ENV
+python3 -m venv .venv
+or
+python3 -m venv .venv --prompt $(basename $(pwd))
+source .venv/bin/activate
+
+CREATE A NEW PROJECT
+uvx fastapi-new my-app
+
+
+REPOMIX
+npx repomix --include "folder1/**/*,folder2/**/*,specific-file.py"
+
+USING UV
+uv init
+uv venv
+source .venv/bin/activate
+uv add fastapi "uvicorn[standard]"
+uv add requirements.txt (if have the requirements.txt file which i actually dont have though) 
+uv lock
+uv sync
+uv sync --locked (to sync keeping the version)
+uv run uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+uv run alembic upgrade head && uv run uvicorn app.main:app --reload (to run migrations and start the app)
+
+# FOR PRODUCTION
+uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 0R 
+alembic upgrade head
+exec gunicorn -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000 app.main:app
+(Handles restarts on crush, scale automatically. this will Run 4 worker processes (adjust based on CPU cores))
+
+
+USING UV REFINED, SHORTENED
+uv init
+uv venv
+source .venv/bin/activate
+uv add fastapi "uvicorn[standard]"
+uv add fastapi "uvicorn[standard]" --active
+uv run uvicorn app.main:app --reload
+uv sync
+uv sync --active
+
+
+
+
+REQUIREMENTS using pip requirements.txt
+pip install "fastapi[standard]"
+pip install -r requirements.txt
+pip freeze > requirements.txt
+
+
+
+
+RUNNING FASTAPI
+uv add fastapi --extra standard
+uvicorn main:app --reload
+fastapi dev main.py
+fastapi run (for production)
+
+RUN USING UV
+uv run uvicorn app.main:app --reload
+
+
+
+
+POSTGRESSQL
+brew services list
+brew services list | grep postgresql
+brew services start postgresql
+pg_isready (to check if postgresql is running and accepting connections)
+
+psql -U mac -d postgres; (i.e connect to postgresql using with default user, 'mac' the username of the machine)
+psql -U saadat -d postgres;
+CREATE ROLE myprojectdbuser WITH LOGIN PASSWORD 'myprojectdbPassword';
+CREATE DATABASE myprojectdb OWNER myprojectdbuser;
+GRANT ALL PRIVILEGES ON DATABASE todoprojectdb TO todoprojectdbuser;
+psql -U myprojectdbuser -d postgres; (for a specific user)
+psql -U postgres (without specifying a database user, it will connect to the default database using 'postgres' user)
+
+
+ALTER ROLE myprojectdbuser CREATEDB; (to grant the user the ability to create databases if the user myprojectdbuser is supposed to be used to create databases)
+CREATE DATABASE myTestDb;
+CREATE ROLE userMe WITH LOGIN PASSWORD 'myDbPassword';
+GRANT ALL PRIVILEGES ON DATABASE myTestDb TO userMe;
+
+\l (list databases)
+\du (list users)
+\c postgres (connect to postgres or any other db name)
+\dt (list tables)
+
+# GRANTING PERMISSIONS
+psql -U saadat -d mytestdb -c "GRANT ALL ON SCHEMA public TO saadat;"
+psql -U saadat -d mytestdb -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO saadat;"
+psql -U saadat -d mytestdb -c "GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO saadat;"
+
+# OR JUST MAKE A SUPERUSER
+psql -U postgres -c "ALTER USER saadat WITH SUPERUSER;"
+
+MIGRATIONS WITH ALEMBIC
+uv add alembic
+alembic init alembic
+alembic revision --autogenerate -m "Initial migration"
+alembic upgrade head
+
+# testing
+alembic revision --autogenerate -m "test"
+
+
+# Drop a db and clean to restart afresh
+
+# First terminate the connection to the database
+psql -U mac -d postgres; (first connect to postgres database)
+\c postgres (connect to postgres (default) database before running the following to terminate connections to the mytestdb database)
+
+SELECT pg_terminate_backend(pg_stat_activity.pid)
+FROM pg_stat_activity
+WHERE pg_stat_activity.datname = 'mytestdb'
+AND pid <> pg_backend_pid();
+
+
+# Then drop the database
+psql -U mac -d postgres -c "DROP DATABASE IF EXISTS mytestdb;"
+psql -U mac -d postgres -c "CREATE DATABASE mytestdb OWNER mac;"
+
+rm -f alembic/versions/*.py
+alembic revision --autogenerate -m "initial migration"
+alembic upgrade head
+
+# Or delete and recreate the versions directory
+
+rm -rf alembic/versions
+mkdir alembic/versions
+touch alembic/versions/__init__.py
+
+or use the script cleandb.sh 
+chmod +x cleandb.sh
+./cleandb.sh
+
+JWT SECTRET GENERATION
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+

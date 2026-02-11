@@ -1,0 +1,51 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# --- Project Specific ---
+.env
+.env.*
+! .env.example
+repomix-output.xml
+repomix-output.txt
+
+# --- Python & FastAPI ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# chroma db
+chroma_db
+
+# --- Alembic (Migrations) ---
+# Note: We keep versions/*.py but ignore compiled/temp files
+lib/alembic/
+alembic/versions/*.pyc
+
+# --- Databases ---
+*.sqlite
+*.sqlite3
+*.db
+
+# --- OS & IDE ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- UV (if using uv) ---
+.uv
