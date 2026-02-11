@@ -1,12 +1,15 @@
 # app/cdss_engine/fusion_engine.py
 """
-CDSS Fusion Engine - IMPROVED
-Better integration of patient history, clinical complaint, image findings, and knowledge
+CDSS Fusion Engine - PRODUCTION READY
+- Structured Pydantic output
+- Handles zero knowledge chunks gracefully
+- Clinical notes integration
+- Works with ALL retriever configurations
 """
 import logging
 import time
 from typing import List, Optional
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cdss_engine.schemas import (
@@ -21,6 +24,7 @@ from app.RAGsystem.llm_client import llm_client
 from app.visionsystem.vision_client import vision_client
 from app.visionsystem.image_processor import ImageProcessor
 from app.system_models.patient_model.patient_model import Patient
+from app.system_models.clinical_note_model.clinical_note_model import ClinicalNote
 from config.ragconfig import rag_settings
 from config.visionconfig import vision_settings
 
@@ -32,36 +36,38 @@ logger = logging.getLogger(__name__)
 
 class CDSSFusionEngine:
     """
-    IMPROVED CDSS Pipeline:
-    1. Fetch patient history + clinical complaint
-    2. Analyze radiograph (if provided) - uses complaint for context
-    3. Retrieve knowledge - enhanced by complaint + image findings
-    4. Generate recommendation - integrates ALL context
+    Production-ready CDSS with:
+    - Structured Pydantic output (always valid)
+    - Graceful handling of zero knowledge chunks
+    - Clinical notes integration
+    - Full configurability for experiments
     """
 
     def __init__(self):
         self.retriever_factory = RetrieverFactory()
         logger.info("🏥 CDSS Fusion Engine initialized")
 
-    async def fetch_patient_history(
+    async def fetch_patient_history_with_notes(
         self, 
         patient_id: int, 
-        db: AsyncSession
-    ) -> PatientHistory:
-        """Fetch patient from database with logging."""
+        db: AsyncSession,
+        num_notes: int = 3
+    ) -> tuple[PatientHistory, List[dict]]:
+        """Fetch patient demographics + recent clinical notes."""
         logger.info(f"\n{'='*70}")
-        logger.info(f"STEP 1: FETCH PATIENT HISTORY FROM DATABASE")
+        logger.info(f"STEP 1: FETCH PATIENT HISTORY + CLINICAL NOTES")
         logger.info(f"{'='*70}")
-        logger.info(f"📋 Querying database for patient ID: {patient_id}")
+        logger.info(f"📋 Patient ID: {patient_id}")
         
         try:
+            # Fetch patient
             result = await db.execute(
                 select(Patient).where(Patient.id == patient_id)
             )
             patient = result.scalar_one_or_none()
             
             if not patient:
-                logger.error(f"❌ Patient {patient_id} not found in database")
+                logger.error(f"❌ Patient {patient_id} not found")
                 raise ValueError(f"Patient with ID {patient_id} not found")
             
             # Calculate age
@@ -73,17 +79,43 @@ class CDSSFusionEngine:
                     (today.month, today.day) < (patient.dob.month, patient.dob.day)
                 )
             
-            logger.info(f"✓ Patient retrieved from database:")
-            logger.info(f"   Name: {patient.first_name} {patient.last_name}")
-            logger.info(f"   Age: {age} years")
-            logger.info(f"   Gender: {patient.gender}")
-            logger.info(f"   DOB: {patient.dob}")
+            logger.info(f"✓ Patient: {patient.first_name} {patient.last_name}")
+            logger.info(f"   Age: {age}, Gender: {patient.gender}")
+            
+            # Fetch clinical notes
+            logger.info(f"\n📝 Fetching clinical notes (up to {num_notes})...")
+            
+            notes_query = (
+                select(ClinicalNote)
+                .join(ClinicalNote.encounter)  # Join through encounter
+                .where(ClinicalNote.encounter.has(patient_id=patient_id))
+                .order_by(desc(ClinicalNote.created_at))
+                .limit(num_notes)
+            )
+            
+            notes_result = await db.execute(notes_query)
+            clinical_notes_raw = notes_result.scalars().all()
+            
+            formatted_notes = []
+            if clinical_notes_raw:
+                logger.info(f"✓ Retrieved {len(clinical_notes_raw)} clinical note(s):")
+                for i, note in enumerate(clinical_notes_raw, 1):
+                    formatted_notes.append({
+                        "date": note.created_at.strftime("%Y-%m-%d %H:%M"),
+                        "type": note.note_type,
+                        "content": note.content,
+                        "author_id": note.author_id
+                    })
+                    logger.info(f"   [{i}] {note.created_at.strftime('%Y-%m-%d')} - {note.note_type}")
+                    logger.info(f"       {note.content[:100]}...")
+            else:
+                logger.info(f"   No previous clinical notes found")
             
             patient_history = PatientHistory(
                 patient_id=str(patient.id),
                 age=age,
                 gender=patient.gender,
-                chief_complaint=None,  # Will be set by caller
+                chief_complaint=None,
                 medical_history=[],
                 current_medications=[],
                 allergies=[],
@@ -92,7 +124,7 @@ class CDSSFusionEngine:
                 pain_level=None
             )
             
-            return patient_history
+            return patient_history, formatted_notes
             
         except Exception as e:
             logger.error(f"❌ Database error: {e}", exc_info=True)
@@ -104,42 +136,21 @@ class CDSSFusionEngine:
         clinical_complaint: str,
         patient_info: str
     ) -> ImageObservation:
-        """
-        Analyze radiograph with clinical context.
-        
-        NOTE: Vision model receives clinical context for better analysis.
-        This helps the model focus on relevant pathology.
-        """
+        """Analyze radiograph."""
         logger.info(f"\n{'='*70}")
-        logger.info(f"STEP 2: ANALYZE RADIOGRAPH WITH CLINICAL CONTEXT")
+        logger.info(f"STEP 2: ANALYZE RADIOGRAPH")
         logger.info(f"{'='*70}")
         logger.info(f"🔍 Vision Model: {vision_settings.VISION_MODEL_PROVIDER}")
-        logger.info(f"📝 Clinical Context Provided to Vision Model:")
-        logger.info(f"   Complaint: {clinical_complaint}")
-        logger.info(f"   Patient: {patient_info}")
-        logger.info(f"   ℹ️  Note: Providing context helps vision model focus on relevant pathology")
+        logger.info(f"📝 Context: {clinical_complaint}")
         
         image = ImageProcessor.preprocess_image(image_bytes)
         logger.info(f"✓ Image preprocessed: {image.size}")
         
-        # Analyze with vision model
-        # Note: Standard analyze_dental_radiograph uses dental-specific prompts
-        # The clinical context helps but isn't strictly necessary since the
-        # prompts already instruct the model to look for dental pathology
         result = vision_client.analyze_dental_radiograph(image)
         
-        logger.info(f"✓ Vision analysis complete:")
-        logger.info(f"   Model used: {result['model']}")
-        logger.info(f"   Description length: {len(result['detailed_description'])} chars")
-        logger.info(f"   Pathology summary: {len(result.get('pathology_summary', ''))} chars")
-        
-        # Log key findings
-        if result.get('pathology_summary'):
-            logger.info(f"📊 Key Pathological Findings:")
-            summary_lines = result['pathology_summary'].split('\n')[:5]
-            for line in summary_lines:
-                if line.strip():
-                    logger.info(f"   • {line.strip()}")
+        logger.info(f"✓ Analysis complete")
+        logger.info(f"   Model: {result['model']}")
+        logger.info(f"   Description: {len(result['detailed_description'])} chars")
         
         return ImageObservation(
             raw_description=result["detailed_description"],
@@ -154,63 +165,56 @@ class CDSSFusionEngine:
         image_obs: Optional[ImageObservation] = None
     ) -> List[RetrievedKnowledge]:
         """
-        Retrieve knowledge enhanced by complaint AND image findings.
+        Retrieve knowledge - works with ANY retriever configuration.
+        
+        May return 0 chunks if:
+        - similarity_score_threshold is too high
+        - ChromaDB is empty
+        - Query doesn't match content
         """
         logger.info(f"\n{'='*70}")
-        logger.info(f"STEP 3: RETRIEVE CLINICAL KNOWLEDGE FROM KNOWLEDGE BASE")
+        logger.info(f"STEP 3: RETRIEVE CLINICAL KNOWLEDGE")
         logger.info(f"{'='*70}")
         
-        # Build enhanced search query
+        # Build query
         query_parts = [clinical_complaint]
-        
         if image_obs and image_obs.pathology_summary:
-            # Extract key pathology terms for better retrieval
-            pathology_terms = image_obs.pathology_summary[:200]
-            query_parts.append(f"Radiographic findings: {pathology_terms}")
+            query_parts.append(f"Findings: {image_obs.pathology_summary[:200]}")
         
         enhanced_query = ". ".join(query_parts)
         
-        logger.info(f"🔍 Search Query Construction:")
-        logger.info(f"   Base: {clinical_complaint}")
-        if image_obs:
-            logger.info(f"   Enhanced with image findings: Yes")
-        else:
-            logger.info(f"   Enhanced with image findings: No")
-        logger.info(f"📚 Final search query (first 200 chars):")
-        logger.info(f"   {enhanced_query[:200]}...")
-        logger.info(f"⚙️  Retrieval Settings:")
-        logger.info(f"   Type: {rag_settings.RETRIEVER_TYPE}")
-        logger.info(f"   K (chunks to retrieve): {rag_settings.RETRIEVAL_K}")
-        logger.info(f"   Embedding provider: {rag_settings.EMBEDDING_PROVIDER}")
-        logger.info(f"   Embedding model: {rag_settings.current_embedding_model}")
+        logger.info(f"🔍 Query: {enhanced_query[:150]}...")
+        logger.info(f"⚙️  Configuration:")
+        logger.info(f"   Retriever: {rag_settings.RETRIEVER_TYPE}")
+        logger.info(f"   K: {rag_settings.RETRIEVAL_K}")
+        if rag_settings.RETRIEVER_TYPE == "similarity_score_threshold":
+            logger.info(f"   Threshold: {rag_settings.SIMILARITY_THRESHOLD}")
         
         try:
             retriever = self.retriever_factory.get_retriever()
             docs = retriever.invoke(enhanced_query)
             
-            logger.info(f"✓ Retrieved {len(docs)} document chunks")
+            logger.info(f"✓ Retrieved {len(docs)} chunks")
             
             if len(docs) == 0:
-                logger.warning(f"⚠️  WARNING: NO DOCUMENTS RETRIEVED!")
-                logger.warning(f"   Possible causes:")
-                logger.warning(f"   1. ChromaDB is empty - run: python scripts/ingest_documents.py")
-                logger.warning(f"   2. Query doesn't match document content")
-                logger.warning(f"   3. Embedding model mismatch")
-                logger.warning(f"   Path: {rag_settings.PERSIST_DIR}")
+                logger.warning(f"⚠️  ZERO CHUNKS RETRIEVED")
+                logger.warning(f"   This is expected if:")
+                logger.warning(f"   - similarity_score_threshold is high")
+                logger.warning(f"   - Query doesn't match document content")
+                logger.warning(f"   LLM will use general knowledge instead")
                 return []
             
             knowledge = []
-            logger.info(f"📖 Retrieved Knowledge Chunks:")
+            logger.info(f"📖 Retrieved Knowledge:")
             for i, doc in enumerate(docs, 1):
                 pages = doc.metadata.get("pages", [])
                 if not pages and "page" in doc.metadata:
                     pages = [doc.metadata["page"] + 1]
                 
-                source = doc.metadata.get("source", "Clinical Guidelines")
-                preview = doc.page_content[:100].replace('\n', ' ')
+                source = doc.metadata.get("source", "Guidelines")
+                preview = doc.page_content[:80].replace('\n', ' ')
                 
-                logger.info(f"   [{i}] Source: {source}, Pages: {pages}")
-                logger.info(f"       Preview: {preview}...")
+                logger.info(f"   [{i}] Pages {pages}: {preview}...")
                 
                 knowledge.append(
                     RetrievedKnowledge(
@@ -224,119 +228,105 @@ class CDSSFusionEngine:
             return knowledge
             
         except Exception as e:
-            logger.error(f"❌ Retrieval failed: {e}", exc_info=True)
+            logger.error(f"❌ Retrieval error: {e}", exc_info=True)
             return []
 
     def fuse_and_reason(
         self,
         patient_history: PatientHistory,
+        clinical_notes: List[dict],
         clinical_complaint: str,
         image_obs: Optional[ImageObservation],
         knowledge: List[RetrievedKnowledge],
     ) -> ClinicalRecommendation:
         """
-        Generate recommendation integrating ALL context:
-        - Patient demographics and history
-        - Clinical complaint
-        - Image findings
-        - Retrieved knowledge
+        Generate recommendation with structured Pydantic output.
+        
+        CRITICAL: Handles zero knowledge chunks gracefully.
         """
         logger.info(f"\n{'='*70}")
-        logger.info(f"STEP 4: GENERATE CLINICAL RECOMMENDATION (CONTEXT FUSION)")
+        logger.info(f"STEP 4: GENERATE STRUCTURED RECOMMENDATION")
         logger.info(f"{'='*70}")
-        logger.info(f"🤖 LLM Configuration:")
-        logger.info(f"   Provider: {rag_settings.LLM_PROVIDER}")
-        logger.info(f"   Model: {rag_settings.current_llm_model}")
-        logger.info(f"   Temperature: {rag_settings.LLM_TEMPERATURE}")
+        logger.info(f"🤖 LLM: {rag_settings.LLM_PROVIDER}")
         
-        # Build comprehensive patient context
-        patient_ctx = f"""Patient Demographics and History:
-- Patient ID: {patient_history.patient_id}
-- Age: {patient_history.age or 'Unknown'} years
-- Gender: {patient_history.gender or 'Unknown'}
-- Medical History: {', '.join(patient_history.medical_history) or 'None reported'}
-- Current Medications: {', '.join(patient_history.current_medications) or 'None'}
-- Known Allergies: {', '.join(patient_history.allergies) or 'None'}
-- Pain Level: {patient_history.pain_level or 'Not specified'}/10
+        knowledge_available = len(knowledge) > 0
+        
+        # Patient context
+        patient_ctx = f"""Patient Demographics:
+- ID: {patient_history.patient_id}
+- Age: {patient_history.age or 'Unknown'}, Gender: {patient_history.gender or 'Unknown'}
+- Medical History: {', '.join(patient_history.medical_history) or 'None'}
+- Medications: {', '.join(patient_history.current_medications) or 'None'}
+- Allergies: {', '.join(patient_history.allergies) or 'None'}
 
-Chief Complaint (Current Visit):
-{clinical_complaint}"""
+Current Complaint: {clinical_complaint}"""
 
-        # Build image findings context
+        if clinical_notes:
+            patient_ctx += f"\n\nRecent Clinical Notes ({len(clinical_notes)}):\n"
+            for i, note in enumerate(clinical_notes, 1):
+                patient_ctx += f"[{i}] {note['date']} - {note['type']}: {note['content']}\n"
+
+        # Image findings
         image_ctx = ""
         if image_obs:
-            image_ctx = f"""Radiographic Analysis Results (Model: {image_obs.model_used}):
-
-=== DETAILED RADIOGRAPHIC DESCRIPTION ===
+            image_ctx = f"""Radiograph Analysis ({image_obs.model_used}):
 {image_obs.raw_description}
 
-=== PATHOLOGY CHECKLIST ===
-{image_obs.pathology_summary}
-
-Radiograph Confidence Level: {image_obs.confidence}"""
+Pathology Summary:
+{image_obs.pathology_summary}"""
         else:
-            image_ctx = "No radiograph provided for this consultation."
+            image_ctx = "No radiograph provided."
 
-        # Build guidelines context
-        guidelines_ctx = ""
-        all_page_refs = []
-        
-        if len(knowledge) > 0:
-            guidelines_ctx = "Retrieved Clinical Guidelines (from knowledge base):\n\n"
+        # Guidelines context
+        if knowledge_available:
+            guidelines_ctx = "Clinical Guidelines:\n\n"
             for i, k in enumerate(knowledge, 1):
-                pages_str = f"Pages: {', '.join(map(str, k.pages))}" if k.pages else "Page unknown"
-                guidelines_ctx += f"--- Source {i} ({pages_str}) ---\n{k.content}\n\n"
-                all_page_refs.extend([f"Page {p}" for p in k.pages])
+                pages = f"Pages {', '.join(map(str, k.pages))}" if k.pages else ""
+                guidelines_ctx += f"[{i}] {pages}\n{k.content}\n\n"
         else:
-            guidelines_ctx = "WARNING: No clinical guidelines retrieved from knowledge base. Recommendation will be based on general dental knowledge only."
+            guidelines_ctx = "⚠️ No clinical guidelines retrieved from knowledge base.\nRecommendation will be based on general dental knowledge."
         
-        logger.info(f"📊 Context Summary Being Sent to LLM:")
-        logger.info(f"   Patient context: {len(patient_ctx)} characters")
-        logger.info(f"   Clinical complaint: {len(clinical_complaint)} characters")
-        logger.info(f"   Image findings: {len(image_ctx)} characters")
-        logger.info(f"   Guidelines: {len(guidelines_ctx)} characters")
-        logger.info(f"   Knowledge chunks: {len(knowledge)}")
-        logger.info(f"   Total context size: {len(patient_ctx) + len(image_ctx) + len(guidelines_ctx)} characters")
+        logger.info(f"📊 Context:")
+        logger.info(f"   Patient: {len(patient_ctx)} chars")
+        logger.info(f"   Notes: {len(clinical_notes)} items")
+        logger.info(f"   Image: {len(image_ctx)} chars")
+        logger.info(f"   Knowledge: {len(knowledge)} chunks")
+        logger.info(f"   Knowledge available: {knowledge_available}")
         
-        # Generate recommendation
         try:
-            logger.info(f"⚙️  Calling LLM to generate recommendation...")
+            logger.info(f"⚙️  Calling LLM with structured output...")
             
+            # Call LLM with knowledge_available flag
             result = llm_client.generate_clinical_recommendation(
                 patient_context=patient_ctx,
                 image_findings=image_ctx,
                 retrieved_knowledge=guidelines_ctx,
-                query=clinical_complaint
+                query=clinical_complaint,
+                knowledge_available=knowledge_available  # CRITICAL FLAG
             )
             
-            logger.info(f"✓ LLM recommendation generated successfully")
-            logger.info(f"📋 Recommendation Summary:")
-            logger.info(f"   Diagnosis: {result.get('diagnosis', 'N/A')[:150]}...")
-            logger.info(f"   Differential diagnoses: {len(result.get('differential_diagnoses', []))} alternatives")
-            logger.info(f"   Management plan length: {len(result.get('recommended_management', ''))} characters")
-            logger.info(f"   Page references: {len(result.get('page_references', []))} citations")
+            logger.info(f"✓ Structured recommendation generated")
+            logger.info(f"   Diagnosis: {result['diagnosis'][:100]}...")
+            logger.info(f"   Management: {len(result['recommended_management'])} chars")
+            logger.info(f"   References: {result['page_references']}")
             
             return ClinicalRecommendation(
-                diagnosis=result.get("diagnosis", "Unable to determine diagnosis"),
-                differential_diagnoses=result.get("differential_diagnoses", []),
-                recommended_management=result.get("recommended_management", "Consult with supervising dentist"),
-                page_references=result.get("page_references", list(set(all_page_refs))[:10]),
-                confidence_level="high" if (len(knowledge) > 3 and image_obs and image_obs.confidence == "high") else "medium" if len(knowledge) > 0 else "low",
+                diagnosis=result["diagnosis"],
+                differential_diagnoses=result["differential_diagnoses"],
+                recommended_management=result["recommended_management"],
+                page_references=result["page_references"],
+                confidence_level="high" if (knowledge_available and len(knowledge) > 3) else "medium" if knowledge_available else "low",
                 llm_provider=rag_settings.LLM_PROVIDER
             )
             
         except Exception as e:
-            logger.error(f"❌ LLM generation failed: {e}", exc_info=True)
-            logger.error(f"   This usually means:")
-            logger.error(f"   1. LLM returned invalid JSON structure")
-            logger.error(f"   2. Validation error (e.g., list instead of string)")
-            logger.error(f"   3. LLM timeout or connection issue")
+            logger.error(f"❌ Generation failed: {e}", exc_info=True)
             
             return ClinicalRecommendation(
-                diagnosis="Error generating recommendation - see logs",
+                diagnosis=f"Error: {str(e)}",
                 differential_diagnoses=[],
-                recommended_management=f"LLM Error: {str(e)}. Please consult supervising dentist for clinical assessment.",
-                page_references=list(set(all_page_refs))[:10] if all_page_refs else [],
+                recommended_management="Consult supervising dentist.",
+                page_references=["Error - unable to generate"],
                 confidence_level="low",
                 llm_provider=rag_settings.LLM_PROVIDER
             )
@@ -349,97 +339,81 @@ Radiograph Confidence Level: {image_obs.confidence}"""
         image_bytes: Optional[bytes] = None,
         user_id: int = 1
     ) -> CDSSResponse:
-        """
-        Main CDSS pipeline with comprehensive logging and context integration.
-        """
+        """Main CDSS pipeline - production ready."""
         start_time = time.time()
         
         logger.info(f"\n{'#'*70}")
-        logger.info(f"# CDSS PIPELINE INITIATED")
+        logger.info(f"# CDSS PIPELINE - {time.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"{'#'*70}")
-        logger.info(f"📅 Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"👤 Patient ID: {patient_id}")
-        logger.info(f"👨‍⚕️ User/Doctor ID: {user_id}")
-        logger.info(f"💬 Chief Complaint: {chief_complaint}")
-        logger.info(f"🖼️  Radiograph provided: {'Yes' if image_bytes else 'No'}")
+        logger.info(f"User: (Dentist ID) {user_id}")
+        logger.info(f"Patient: {patient_id}")
+        logger.info(f"Complaint: {chief_complaint}")
+        logger.info(f"Config: {rag_settings.RETRIEVER_TYPE}")
+        if rag_settings.RETRIEVER_TYPE == "similarity_score_threshold":
+            logger.info(f"Similarity threshold: {rag_settings.SIMILARITY_THRESHOLD}")
+        elif rag_settings.RETRIEVER_TYPE == "mmr":
+            logger.info(f"Diversity: {rag_settings.LAMBDA_MULT}")
+            logger.info(f"Fetch K: {rag_settings.FETCH_K}")
 
-        # Step 1: Patient history
-        patient_history = await self.fetch_patient_history(patient_id, db)
+        # Pipeline
+        patient_history, clinical_notes = await self.fetch_patient_history_with_notes(patient_id, db, 3)
         patient_history.chief_complaint = chief_complaint
         
-        patient_info = f"{patient_history.age}y {patient_history.gender}"
-
-        # Step 2: Image analysis (with clinical context)
         image_obs = None
         if image_bytes:
             try:
                 image_obs = self.analyze_radiograph(
                     image_bytes, 
                     chief_complaint, 
-                    patient_info
+                    f"{patient_history.age}y {patient_history.gender}"
                 )
             except Exception as e:
-                logger.error(f"❌ Image analysis failed: {e}", exc_info=True)
+                logger.error(f"❌ Image analysis failed: {e}")
 
-        # Step 3: Knowledge retrieval (enhanced by complaint + image)
         knowledge = self.retrieve_knowledge(chief_complaint, image_obs)
 
-        # Step 4: Generate recommendation (ALL context integrated)
         recommendation = self.fuse_and_reason(
             patient_history, 
+            clinical_notes,
             chief_complaint,
             image_obs, 
             knowledge
         )
 
-        processing_time = time.time() - start_time
-
-        reasoning = f"""Clinical Decision Support Analysis Summary:
-
-1. PATIENT INFORMATION:
-   - ID: {patient_id}, Age: {patient_history.age}y, Gender: {patient_history.gender}
-   - Chief Complaint: {chief_complaint}
-
-2. RADIOGRAPHIC ANALYSIS:
-   - Performed: {'Yes (' + image_obs.model_used + ')' if image_obs else 'No'}
-   - Key Findings: {image_obs.pathology_summary[:100] + '...' if image_obs else 'N/A'}
-
-3. KNOWLEDGE RETRIEVAL:
-   - Chunks Retrieved: {len(knowledge)}
-   - Sources: {', '.join(set([k.source for k in knowledge]))} if knowledge else 'None'
-
-4. CLINICAL RECOMMENDATION:
-   - Diagnosis: {recommendation.diagnosis[:100]}...
-   - Confidence: {recommendation.confidence_level}
-   - LLM Provider: {rag_settings.LLM_PROVIDER}"""
+        elapsed = time.time() - start_time
 
         logger.info(f"\n{'#'*70}")
-        logger.info(f"# CDSS PIPELINE COMPLETED SUCCESSFULLY")
+        logger.info(f"# COMPLETED IN {elapsed:.2f}s")
         logger.info(f"{'#'*70}")
-        logger.info(f"⏱️  Total Processing Time: {processing_time:.2f} seconds")
-        logger.info(f"✓ Final Diagnosis: {recommendation.diagnosis[:100]}...")
-        logger.info(f"✓ Confidence Level: {recommendation.confidence_level}")
-        logger.info(f"✓ Knowledge Chunks Used: {len(knowledge)}")
-        logger.info(f"✓ Page References: {len(recommendation.page_references)}")
+        logger.info(f"Diagnosis: {recommendation.diagnosis[:80]}...")
+        logger.info(f"Knowledge: {len(knowledge)} chunks")
+        logger.info(f"Notes: {len(clinical_notes)} items")
+        logger.info(f"Confidence: {recommendation.confidence_level}")
         logger.info(f"{'#'*70}\n")
 
         return CDSSResponse(
             recommendation=recommendation,
             image_observations=image_obs,
             knowledge_sources=knowledge,
-            reasoning_chain=reasoning,
+            reasoning_chain=f"""Analysis:
+1. Patient: {patient_id}, {patient_history.age}y {patient_history.gender}
+2. Complaint: {chief_complaint}
+3. Notes: {len(clinical_notes)} clinical notes
+4. Image: {'Yes (' + image_obs.model_used + ')' if image_obs else 'No'}
+5. Knowledge: {len(knowledge)} chunks
+6. Diagnosis: {recommendation.diagnosis}
+7. Confidence: {recommendation.confidence_level}""",
             processing_metadata={
-                "total_time_seconds": round(processing_time, 2),
+                "total_time_seconds": round(elapsed, 2),
                 "knowledge_chunks": len(knowledge),
+                "clinical_notes_count": len(clinical_notes),
+                "retriever_type": rag_settings.RETRIEVER_TYPE,
+                "similarity_threshold": rag_settings.SIMILARITY_THRESHOLD,
                 "llm_provider": rag_settings.LLM_PROVIDER,
                 "llm_model": rag_settings.current_llm_model,
                 "vision_provider": vision_settings.VISION_MODEL_PROVIDER if image_obs else "N/A",
-                "vision_model": image_obs.model_used if image_obs else "N/A",
                 "embedding_provider": rag_settings.EMBEDDING_PROVIDER,
-                "embedding_model": rag_settings.current_embedding_model,
-                "retriever_type": rag_settings.RETRIEVER_TYPE,
                 "user_id": user_id,
-                "patient_id": patient_id,
-                "chromadb_path": rag_settings.PERSIST_DIR
+                "patient_id": patient_id
             },
         )

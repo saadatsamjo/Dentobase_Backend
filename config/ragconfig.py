@@ -53,7 +53,7 @@ class RAGSettings(BaseSettings):
     # Which retrieval strategy to use
     # Options: "similarity", "mmr", "multi_query", "similarity_score_threshold"
     # Recommended: "mmr" for comprehensive clinical coverage
-    RETRIEVER_TYPE: Literal["similarity", "mmr", "multi_query", "similarity_score_threshold"] = "similarity_score_threshold"
+    RETRIEVER_TYPE: Literal["similarity", "mmr", "multi_query", "similarity_score_threshold"] = "mmr"
     
     # Number of document chunks to retrieve
     RETRIEVAL_K: int = 8
@@ -66,7 +66,7 @@ class RAGSettings(BaseSettings):
     LAMBDA_MULT: float = 0.7  # Favor relevance for clinical precision
     
     # Minimum similarity threshold (optional, None to disable)
-    SIMILARITY_THRESHOLD: Optional[float] = 0.8
+    SIMILARITY_THRESHOLD: Optional[float] = 0.6
     
     # ============================================================================
     # LLM GENERATION SETTINGS

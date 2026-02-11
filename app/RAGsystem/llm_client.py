@@ -1,251 +1,273 @@
 # app/RAGsystem/llm_client.py
 """
-Unified LLM Client with IMPROVED PROMPT and validation handling
+LLM Client with STRUCTURED OUTPUT using Pydantic
+Works with ANY LLM provider and handles zero knowledge chunks gracefully
 """
 import logging
-import json
-from typing import Dict, Any
+from typing import Any, Dict
+
+from pydantic import BaseModel, Field
+
 from config.ragconfig import rag_settings
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================================
+# PYDANTIC OUTPUT SCHEMA
+# ============================================================================
+class ClinicalRecommendationOutput(BaseModel):
+    """Structured output schema for LLM recommendations."""
+
+    diagnosis: str = Field(..., description="Primary clinical diagnosis as a single string")
+    differential_diagnoses: list[str] = Field(
+        default_factory=list, description="List of alternative diagnoses to consider"
+    )
+    recommended_management: str = Field(
+        ..., description="Complete treatment plan as a single string with numbered steps"
+    )
+    page_references: list[str] = Field(
+        default_factory=list,
+        description="Page numbers or chapters from clinical guidelines, or 'Based on general practice' if no guidelines",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "diagnosis": "Irreversible pulpitis with periapical abscess, tooth #30",
+                "differential_diagnoses": ["Acute apical periodontitis", "Cracked tooth syndrome"],
+                "recommended_management": "1. Emergency treatment: Pulpectomy or extraction; 2. Pain management with NSAIDs (Ibuprofen 400mg TID); 3. Antibiotics if systemic involvement (Amoxicillin 500mg TID for 7 days); 4. Referral to endodontist for definitive root canal therapy; 5. Follow-up radiograph in 3-6 months.",
+                "page_references": ["Page 100", "Page 101"],
+            }
+        }
+
+
 class LLMClient:
-    """Unified LLM interface with robust JSON parsing."""
-    
+    """Unified LLM client with structured Pydantic output."""
+
     _instance = None
     _clients = {}
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
-    def _get_client(self):
-        """Get appropriate LLM client based on configuration."""
+
+    def _get_structured_client(self):
+        """
+        Get LLM client with structured output.
+
+        Uses .with_structured_output() for OpenAI/Anthropic
+        Falls back to prompt-based JSON for Ollama
+        """
         provider = rag_settings.LLM_PROVIDER
-        
-        if provider not in self._clients:
-            if provider == "ollama":
-                from langchain_ollama import ChatOllama
-                self._clients["ollama"] = ChatOllama(
-                    model=rag_settings.OLLAMA_LLM_MODEL,
-                    temperature=rag_settings.LLM_TEMPERATURE,
-                    format="json" if rag_settings.FORCE_JSON_OUTPUT else None
-                )
-            elif provider == "openai":
-                from langchain_openai import ChatOpenAI
-                self._clients["openai"] = ChatOpenAI(
-                    model=rag_settings.OPENAI_LLM_MODEL,
-                    temperature=rag_settings.LLM_TEMPERATURE,
-                    model_kwargs={"response_format": {"type": "json_object"}} if rag_settings.FORCE_JSON_OUTPUT else {}
-                )
-            elif provider == "claude":
-                from langchain_anthropic import ChatAnthropic
-                self._clients["claude"] = ChatAnthropic(
-                    model=rag_settings.CLAUDE_LLM_MODEL,
-                    temperature=rag_settings.LLM_TEMPERATURE
-                )
-            else:
-                raise ValueError(f"Unknown LLM provider: {provider}")
-        
-        return self._clients[provider]
-    
+
+        logger.info(f"🤖 Initializing {provider} LLM with structured output")
+
+        if provider == "openai":
+            from langchain_openai import ChatOpenAI
+
+            base_client = ChatOpenAI(
+                model=rag_settings.OPENAI_LLM_MODEL, temperature=rag_settings.LLM_TEMPERATURE
+            )
+
+            # Use native structured output
+            return base_client.with_structured_output(
+                ClinicalRecommendationOutput, method="json_mode"
+            )
+
+        elif provider == "claude":
+            from langchain_anthropic import ChatAnthropic
+
+            base_client = ChatAnthropic(
+                model=rag_settings.CLAUDE_LLM_MODEL, temperature=rag_settings.LLM_TEMPERATURE
+            )
+
+            # Use native structured output
+            return base_client.with_structured_output(ClinicalRecommendationOutput)
+
+        elif provider == "ollama":
+            # Ollama doesn't support with_structured_output reliably
+            # Use PydanticOutputParser instead
+            from langchain_core.output_parsers import PydanticOutputParser
+            from langchain_ollama import ChatOllama
+
+            base_client = ChatOllama(
+                model=rag_settings.OLLAMA_LLM_MODEL,
+                temperature=rag_settings.LLM_TEMPERATURE,
+                format="json",
+            )
+
+            parser = PydanticOutputParser(pydantic_object=ClinicalRecommendationOutput)
+
+            # Return tuple of (client, parser) for Ollama
+            return (base_client, parser)
+
+        else:
+            raise ValueError(f"Unknown LLM provider: {provider}")
+
     def generate_clinical_recommendation(
         self,
         patient_context: str,
         image_findings: str,
         retrieved_knowledge: str,
-        query: str
+        query: str,
+        knowledge_available: bool,
     ) -> Dict[str, Any]:
         """
         Generate structured clinical recommendation.
-        
-        IMPROVED PROMPT: Explicitly requests string format, not lists.
+
+        Args:
+            patient_context: Patient demographics and history
+            image_findings: Radiograph analysis results
+            retrieved_knowledge: Retrieved guideline chunks
+            query: Clinical question
+            knowledge_available: Whether any knowledge chunks were retrieved
+
+        Returns:
+            Dict matching ClinicalRecommendationOutput schema
         """
-        client = self._get_client()
-        
-        # IMPROVED PROMPT - Clear about data types
-        fusion_prompt = f"""You are a clinical decision support system for dentistry.
+        provider = rag_settings.LLM_PROVIDER
+        client_or_tuple = self._get_structured_client()
 
-=== PATIENT INFORMATION ===
-{patient_context}
+        # Build context-aware prompt
+        if knowledge_available:
+            guidelines_instruction = """You have clinical guidelines available. Use them to support your recommendations.
+                        CRITICAL: Cite actual page numbers from the guidelines in page_references."""
+        else:
+            guidelines_instruction = """⚠️ WARNING: No clinical guidelines were retrieved from the knowledge base.
+                        You must rely on general dental knowledge.
+                        CRITICAL: In page_references, do NOT cite specific pages. Instead use:
+                        - "Based on general dental practice"
+                        - "Standard clinical guidelines" 
+                        - "General endodontic principles"
+                        DO NOT make up page numbers like "Page 45" or "Chapter 7"."""
 
-=== RADIOGRAPHIC FINDINGS ===
-{image_findings}
+        # Construct prompt
+        prompt = f"""You are a clinical decision support system for dentistry.
 
-=== CLINICAL GUIDELINES (Retrieved from Knowledge Base) ===
-{retrieved_knowledge}
+                    === PATIENT INFORMATION ===
+                    {patient_context}
 
-=== CLINICAL QUERY ===
-{query}
+                    === RADIOGRAPHIC FINDINGS ===
+                    {image_findings}
 
-=== YOUR TASK ===
-Based on the patient information, radiographic findings (if provided), and clinical guidelines above, provide a structured clinical recommendation.
+                    === CLINICAL GUIDELINES ===
+                    {retrieved_knowledge}
 
-=== OUTPUT FORMAT ===
-Return ONLY valid JSON with this EXACT structure:
+                    === CLINICAL QUERY ===
+                    {query}
 
-{{
-    "diagnosis": "Primary clinical diagnosis as a single string. Example: Irreversible pulpitis with periapical abscess, tooth #30",
-    
-    "differential_diagnoses": [
-        "Alternative diagnosis 1",
-        "Alternative diagnosis 2"
-    ],
-    
-    "recommended_management": "Complete treatment plan as a SINGLE STRING (NOT a list). Include all steps in one paragraph separated by semicolons or numbered inline. Example: 1. Emergency treatment: Pulpectomy or extraction; 2. Pain management with NSAIDs (Ibuprofen 400mg); 3. Antibiotics if systemic involvement; 4. Follow-up in 3-6 months.",
-    
-    "page_references": [
-        "Page 45",
-        "Page 52",
-        "Chapter 7: Endodontics"
-    ]
-}}
+                    === INSTRUCTIONS ===
+                    {guidelines_instruction}
 
-=== CRITICAL RULES ===
-1. "diagnosis" MUST be a STRING (not array)
-2. "differential_diagnoses" MUST be an ARRAY of strings
-3. "recommended_management" MUST be a SINGLE STRING (NOT an array of objects)
-4. "page_references" MUST be an ARRAY of strings citing actual page numbers from the guidelines
-5. Base recommendations ONLY on provided guidelines
-6. If no guidelines retrieved, use general dental knowledge but note this
-7. Use proper dental terminology
-8. Be specific and actionable
+                    Based on the above information, provide a structured clinical recommendation.
 
-Generate the JSON response now:"""
-        
-        logger.info(f"🤖 Generating recommendation with {rag_settings.LLM_PROVIDER}...")
-        logger.info(f"   Temperature: {rag_settings.LLM_TEMPERATURE}")
-        logger.info(f"   JSON mode: {rag_settings.FORCE_JSON_OUTPUT}")
-        
+                    REQUIREMENTS:
+                    1. diagnosis: Primary diagnosis as a single descriptive string
+                    2. differential_diagnoses: List of 2-3 alternative diagnoses
+                    3. recommended_management: Complete treatment plan as ONE STRING with numbered steps
+                    Format: "1. First step; 2. Second step; 3. Third step"
+                    4. page_references: {"Actual page numbers from guidelines" if knowledge_available else "Generic references like 'Based on general practice'"}
+
+                    Provide your structured recommendation:"""
+
+        logger.info(f"⚙️  Generating structured recommendation...")
+        logger.info(f"   Provider: {provider}")
+        logger.info(f"   Knowledge available: {knowledge_available}")
+
         try:
-            response = client.invoke(fusion_prompt)
-            
-            # Extract content
-            if hasattr(response, 'content'):
-                content = response.content
+            if provider == "ollama":
+                # Ollama: use PydanticOutputParser
+                client, parser = client_or_tuple
+
+                # Add format instructions to prompt
+                format_instructions = parser.get_format_instructions()
+                full_prompt = f"{prompt}\n\n{format_instructions}"
+
+                # Invoke
+                response = client.invoke(full_prompt)
+
+                # Parse with Pydantic
+                parsed = parser.parse(response.content)
+                result = parsed.dict()
+
             else:
-                content = str(response)
-            
-            logger.info(f"✓ LLM raw response received ({len(content)} chars)")
-            logger.info(f"   First 200 chars: {content[:200]}...")
-            
-            # Parse JSON
-            result = self._parse_json_response(content)
-            
-            # VALIDATE AND FIX structure
-            result = self._validate_and_fix_structure(result)
-            
-            logger.info(f"✓ Recommendation parsed successfully")
-            logger.info(f"   Diagnosis: {result.get('diagnosis', 'N/A')[:100]}...")
-            logger.info(f"   Management type: {type(result.get('recommended_management'))}")
-            
+                # OpenAI/Claude: use with_structured_output
+                structured_client = client_or_tuple
+
+                # Invoke directly - returns Pydantic object
+                response = structured_client.invoke(prompt)
+                result = response.dict()
+
+            logger.info(f"✓ Structured output generated successfully")
+            logger.info(f"   Diagnosis: {result['diagnosis'][:100]}...")
+            logger.info(f"   Differential diagnoses: {len(result['differential_diagnoses'])} items")
+            logger.info(f"   Management: {len(result['recommended_management'])} chars")
+            logger.info(f"   Page references: {len(result['page_references'])} items")
+
+            # Validate output types
+            self._validate_output_structure(result)
+
             return result
-            
+
         except Exception as e:
-            logger.error(f"❌ LLM generation failed: {e}", exc_info=True)
-            raise
-    
-    def _parse_json_response(self, content: str) -> Dict:
-        """Parse JSON from LLM response with fallbacks."""
-        # Try direct parse
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            pass
-        
-        # Try extracting from markdown code block
-        if "```json" in content:
-            try:
-                json_str = content.split("```json")[1].split("```")[0].strip()
-                return json.loads(json_str)
-            except (IndexError, json.JSONDecodeError):
-                pass
-        
-        # Try extracting from triple backticks
-        if "```" in content:
-            try:
-                json_str = content.split("```")[1].strip()
-                return json.loads(json_str)
-            except (IndexError, json.JSONDecodeError):
-                pass
-        
-        # Last resort: find JSON-like content
-        try:
-            start = content.find("{")
-            end = content.rfind("}") + 1
-            if start >= 0 and end > start:
-                json_str = content[start:end]
-                return json.loads(json_str)
-        except (ValueError, json.JSONDecodeError):
-            pass
-        
-        raise ValueError(f"Could not parse JSON from response: {content[:500]}")
-    
-    def _validate_and_fix_structure(self, result: Dict) -> Dict:
-        """
-        Validate and fix the response structure.
-        
-        CRITICAL: Fixes the 'recommended_management' being a list issue.
-        """
-        logger.info(f"🔍 Validating response structure...")
-        
-        # Fix diagnosis (must be string)
-        if "diagnosis" not in result or not result["diagnosis"]:
-            result["diagnosis"] = "Unable to determine diagnosis from provided information"
-        elif isinstance(result["diagnosis"], list):
-            result["diagnosis"] = "; ".join(result["diagnosis"])
-        
-        # Fix differential_diagnoses (must be list)
-        if "differential_diagnoses" not in result:
-            result["differential_diagnoses"] = []
-        elif not isinstance(result["differential_diagnoses"], list):
-            result["differential_diagnoses"] = [str(result["differential_diagnoses"])]
-        
-        # FIX recommended_management (MUST BE STRING, NOT LIST!)
-        if "recommended_management" not in result:
-            result["recommended_management"] = "Consult with supervising dentist for treatment planning"
-        elif isinstance(result["recommended_management"], list):
-            logger.warning(f"⚠️  recommended_management is a list, converting to string...")
-            
-            # Convert list of objects/strings to single string
-            management_parts = []
-            for i, item in enumerate(result["recommended_management"], 1):
-                if isinstance(item, dict):
-                    # Item is an object like {"step": "...", "description": "..."}
-                    step = item.get("step", item.get("description", item.get("name", str(item))))
-                    management_parts.append(f"{i}. {step}")
-                elif isinstance(item, str):
-                    management_parts.append(f"{i}. {item}")
-                else:
-                    management_parts.append(f"{i}. {str(item)}")
-            
-            result["recommended_management"] = "; ".join(management_parts)
-            logger.info(f"✓ Fixed: Converted list to string ({len(result['recommended_management'])} chars)")
-        
-        # Fix page_references (must be list)
-        if "page_references" not in result:
-            result["page_references"] = []
-        elif not isinstance(result["page_references"], list):
-            result["page_references"] = [str(result["page_references"])]
-        
-        # Log final structure
-        logger.info(f"✓ Validation complete:")
-        logger.info(f"   diagnosis: {type(result['diagnosis']).__name__}")
-        logger.info(f"   differential_diagnoses: {type(result['differential_diagnoses']).__name__} ({len(result['differential_diagnoses'])} items)")
-        logger.info(f"   recommended_management: {type(result['recommended_management']).__name__}")
-        logger.info(f"   page_references: {type(result['page_references']).__name__} ({len(result['page_references'])} items)")
-        
-        return result
-    
+            logger.error(f"❌ Structured output generation failed: {e}", exc_info=True)
+
+            # Return safe fallback
+            return {
+                "diagnosis": f"Error generating recommendation: {str(e)}",
+                "differential_diagnoses": [],
+                "recommended_management": "Unable to generate recommendation. Please consult supervising dentist.",
+                "page_references": ["Error - no references available"],
+            }
+
+    def _validate_output_structure(self, result: Dict) -> None:
+        """Validate that output matches expected structure."""
+        required_keys = [
+            "diagnosis",
+            "differential_diagnoses",
+            "recommended_management",
+            "page_references",
+        ]
+
+        for key in required_keys:
+            if key not in result:
+                raise ValueError(f"Missing required key: {key}")
+
+        # Type checks
+        if not isinstance(result["diagnosis"], str):
+            raise ValueError(f"diagnosis must be string, got {type(result['diagnosis'])}")
+
+        if not isinstance(result["differential_diagnoses"], list):
+            raise ValueError(
+                f"differential_diagnoses must be list, got {type(result['differential_diagnoses'])}"
+            )
+
+        if not isinstance(result["recommended_management"], str):
+            raise ValueError(
+                f"recommended_management must be string, got {type(result['recommended_management'])}"
+            )
+
+        if not isinstance(result["page_references"], list):
+            raise ValueError(f"page_references must be list, got {type(result['page_references'])}")
+
+        logger.info(f"✓ Output structure validated")
+
     def get_model_info(self) -> Dict:
-        """Get information about currently configured LLM."""
+        """Get current LLM configuration."""
         return {
             "provider": rag_settings.LLM_PROVIDER,
             "model": rag_settings.current_llm_model,
             "temperature": rag_settings.LLM_TEMPERATURE,
-            "json_mode": rag_settings.FORCE_JSON_OUTPUT
+            "structured_output": True,
+            "parser": (
+                "with_structured_output"
+                if rag_settings.LLM_PROVIDER in ["openai", "claude"]
+                else "PydanticOutputParser"
+            ),
         }
+
 
 # Global instance
 llm_client = LLMClient()

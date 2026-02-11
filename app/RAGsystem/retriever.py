@@ -48,8 +48,9 @@ class RetrieverFactory:
         k = k or rag_settings.RETRIEVAL_K
         fetch_k = fetch_k or rag_settings.FETCH_K
         lambda_mult = lambda_mult or rag_settings.LAMBDA_MULT
-        
+        logger.info(f"{'-'*70}")
         logger.info(f"Creating MMR retriever (k={k}, fetch_k={fetch_k}, lambda={lambda_mult})")
+        logger.info(f"{'-'*70}")
         
         return self._get_vectorstore().as_retriever(
             search_type="mmr",

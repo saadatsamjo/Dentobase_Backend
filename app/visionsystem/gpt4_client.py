@@ -3,13 +3,13 @@
 GPT-4 Vision Client - Optimized for Dental Radiographs
 FIXED: Using gpt-4o (current model, not deprecated)
 """
+import os
 import base64
 import logging
-import os
 from io import BytesIO
 
-from openai import OpenAI
 from PIL import Image
+from openai import OpenAI
 
 from config.visionconfig import vision_settings
 
