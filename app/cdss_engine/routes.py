@@ -1,9 +1,9 @@
 # app/cdss_engine/routes.py
 """
-CDSS Routes - Refactored
+CDSS Routes - Updated with tooth_number support
 """
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cdss_engine.fusion_engine import CDSSFusionEngine
@@ -36,6 +36,7 @@ async def get_current_user_id() -> int:
 async def provide_final_recommendation(
     patient_id: int = Form(..., description="Patient database ID"),
     chief_complaint: str = Form(..., description="Main clinical complaint/question"),
+    tooth_number: Optional[str] = Form(None, description="Tooth number(s) affected (e.g., '36' or '36,37')"),
     image: Optional[UploadFile] = File(None, description="Dental radiograph (optional)"),
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id)
@@ -52,6 +53,7 @@ async def provide_final_recommendation(
     **Form Parameters:**
     - **patient_id**: Patient database ID (required)
     - **chief_complaint**: Main complaint or clinical question (required)
+    - **tooth_number**: Tooth number(s) affected (optional, e.g., '36' or '36,37')
     - **image**: Dental periapical radiograph (optional, JPEG/PNG)
     
     **Configuration:**
@@ -66,11 +68,13 @@ async def provide_final_recommendation(
             "diagnosis": "Primary diagnosis",
             "differential_diagnoses": ["Alt 1", "Alt 2"],
             "recommended_management": "Treatment plan",
-            "page_references": ["Page X", "Chapter Y"]
+            "reference_pages": [100, 101, 102]
         },
         "image_observations": {
-            "detailed_description": "Full radiograph analysis",
-            "pathology_summary": "Key findings"
+            "raw_description": "Full radiograph analysis",
+            "pathology_summary": "Key findings",
+            "confidence": "high",
+            "model_used": "llava"
         },
         "processing_metadata": {
             "vision_provider": "llava",
@@ -81,6 +85,12 @@ async def provide_final_recommendation(
     ```
     """
     try:
+        # Parse tooth numbers if provided
+        tooth_numbers = None
+        if tooth_number:
+            # Support comma-separated tooth numbers
+            tooth_numbers = [t.strip() for t in tooth_number.split(',')]
+        
         # Read image if provided
         image_bytes = None
         if image:
@@ -92,6 +102,7 @@ async def provide_final_recommendation(
             chief_complaint=chief_complaint,
             db=db,
             image_bytes=image_bytes,
+            tooth_numbers=tooth_numbers,  # NEW PARAMETER
             user_id=user_id
         )
         
@@ -136,6 +147,7 @@ async def recommendation_from_json(
             chief_complaint=request.chief_complaint,
             db=db,
             image_bytes=None,
+            tooth_numbers=None,
             user_id=user_id
         )
         return result
@@ -169,7 +181,10 @@ async def cdss_health_check():
             },
             "retriever": {
                 "type": rag_settings.RETRIEVER_TYPE,
-                "k": rag_settings.RETRIEVAL_K
+                "k": rag_settings.RETRIEVAL_K,
+                "lambda_multiplier": rag_settings.LAMBDA_MULT if rag_settings.RETRIEVER_TYPE == "mmr" else "N/A",
+                "fetch_k": rag_settings.FETCH_K if rag_settings.RETRIEVER_TYPE == "mmr" else "N/A",
+                "similarity_threshold": rag_settings.SIMILARITY_THRESHOLD if rag_settings.RETRIEVER_TYPE == "similarity_score_threshold" else "N/A"
             }
         }
     }

@@ -1,9 +1,9 @@
 # app/cdss_engine/schemas.py
 """
-CDSS Request/Response Schemas - Refactored
+CDSS Request/Response Schemas - Updated with NoImageProvided handling
 """
 from pydantic import BaseModel, Field
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Union
 from datetime import datetime
 
 # ============================================================================
@@ -32,6 +32,11 @@ class ImageObservation(BaseModel):
     confidence: Literal["high", "medium", "low"] = "medium"
     model_used: str = Field(..., description="Which vision model was used")
 
+class NoImageProvided(BaseModel):
+    """Indicator that no image was provided in the request."""
+    message: str = Field(default="No radiograph image was provided for this consultation")
+    image_required: bool = Field(default=False, description="Whether image is required for this case")
+
 # ============================================================================
 # KNOWLEDGE RETRIEVAL
 # ============================================================================
@@ -53,9 +58,9 @@ class ClinicalRecommendation(BaseModel):
         description="Alternative diagnoses to consider"
     )
     recommended_management: str = Field(..., description="Treatment plan and next steps")
-    page_references: List[str] = Field(
+    reference_pages: List[int] = Field(
         default_factory=list,
-        description="Page numbers or chapters from guidelines"
+        description="Page numbers from guidelines used (integers only, no 'Page X' format)"
     )
     confidence_level: Literal["high", "medium", "low"] = "medium"
     llm_provider: str = Field(default="ollama", description="Which LLM generated this")
@@ -88,9 +93,9 @@ class CDSSResponse(BaseModel):
     recommendation: ClinicalRecommendation
     
     # === SUPPORTING DATA ===
-    image_observations: Optional[ImageObservation] = Field(
-        None,
-        description="Radiograph analysis if image was provided"
+    image_observations: Union[ImageObservation, NoImageProvided] = Field(
+        ...,
+        description="Radiograph analysis if image was provided, or NoImageProvided message"
     )
     
     knowledge_sources: List[RetrievedKnowledge] = Field(
@@ -122,7 +127,7 @@ class CDSSResponse(BaseModel):
                         "Symptomatic irreversible pulpitis"
                     ],
                     "recommended_management": "Root canal therapy indicated for tooth #30. Consider referral to endodontist given periapical radiolucency.",
-                    "page_references": ["Page 45", "Chapter 7: Endodontic Treatment"],
+                    "reference_pages": [45, 46, 47],
                     "confidence_level": "high",
                     "llm_provider": "gpt-4"
                 },
@@ -163,3 +168,4 @@ class VisionAnalysisResponse(BaseModel):
                 "confidence": "high"
             }
         }
+        

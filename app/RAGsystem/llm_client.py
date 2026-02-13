@@ -1,10 +1,11 @@
 # app/RAGsystem/llm_client.py
 """
 LLM Client with STRUCTURED OUTPUT using Pydantic
-Works with ANY LLM provider and handles zero knowledge chunks gracefully
+Updated to properly extract page references from retrieved knowledge
 """
 import logging
-from typing import Any, Dict
+import re
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
 
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# PYDANTIC OUTPUT SCHEMA
+# PYDANTIC OUTPUT SCHEMAS
 # ============================================================================
 class ClinicalRecommendationOutput(BaseModel):
     """Structured output schema for LLM recommendations."""
@@ -26,9 +27,9 @@ class ClinicalRecommendationOutput(BaseModel):
     recommended_management: str = Field(
         ..., description="Complete treatment plan as a single string with numbered steps"
     )
-    page_references: list[str] = Field(
+    reference_pages: list[int] = Field(
         default_factory=list,
-        description="Page numbers or chapters from clinical guidelines, or 'Based on general practice' if no guidelines",
+        description="Page numbers from clinical guidelines (integers only). Only include pages that were actually used from the retrieved knowledge. Do NOT invent page numbers.",
     )
 
     class Config:
@@ -37,7 +38,7 @@ class ClinicalRecommendationOutput(BaseModel):
                 "diagnosis": "Irreversible pulpitis with periapical abscess, tooth #30",
                 "differential_diagnoses": ["Acute apical periodontitis", "Cracked tooth syndrome"],
                 "recommended_management": "1. Emergency treatment: Pulpectomy or extraction; 2. Pain management with NSAIDs (Ibuprofen 400mg TID); 3. Antibiotics if systemic involvement (Amoxicillin 500mg TID for 7 days); 4. Referral to endodontist for definitive root canal therapy; 5. Follow-up radiograph in 3-6 months.",
-                "page_references": ["Page 100", "Page 101"],
+                "reference_pages": [100, 101, 352],
             }
         }
 
@@ -106,6 +107,38 @@ class LLMClient:
         else:
             raise ValueError(f"Unknown LLM provider: {provider}")
 
+    def _extract_available_pages(self, retrieved_knowledge: str) -> List[int]:
+        """
+        Extract all page numbers from the retrieved knowledge context.
+        This ensures we only reference pages that were actually retrieved.
+
+        Args:
+            retrieved_knowledge: The formatted knowledge context
+
+        Returns:
+            List of unique page numbers available in the retrieved knowledge
+        """
+        available_pages = set()
+
+        # Match patterns like "Pages [385]" or "Pages 385" or "[1] [Pages 385, 386]"
+        # More flexible pattern to catch various formats
+        page_patterns = [
+            r"Pages?\s*\[([0-9,\s]+)\]",  # Pages [385] or Page [385]
+            r"Pages?\s*([0-9,\s]+)",  # Pages 385 or Pages 385, 386
+            r"\[Pages?\s*([0-9,\s]+)\]",  # [Pages 385] or [Page 385]
+        ]
+
+        for pattern in page_patterns:
+            matches = re.findall(pattern, retrieved_knowledge, re.IGNORECASE)
+            for match in matches:
+                # Extract individual page numbers from comma-separated strings
+                page_nums = re.findall(r"\d+", match)
+                available_pages.update(int(p) for p in page_nums)
+
+        sorted_pages = sorted(list(available_pages))
+        logger.info(f"📖 Available pages from retrieved knowledge: {sorted_pages}")
+        return sorted_pages
+
     def generate_clinical_recommendation(
         self,
         patient_context: str,
@@ -113,6 +146,7 @@ class LLMClient:
         retrieved_knowledge: str,
         query: str,
         knowledge_available: bool,
+        available_pages: List[int] = None,  # NEW PARAMETER
     ) -> Dict[str, Any]:
         """
         Generate structured clinical recommendation.
@@ -123,6 +157,7 @@ class LLMClient:
             retrieved_knowledge: Retrieved guideline chunks
             query: Clinical question
             knowledge_available: Whether any knowledge chunks were retrieved
+            available_pages: List of page numbers actually retrieved (optional, will be extracted if not provided)
 
         Returns:
             Dict matching ClinicalRecommendationOutput schema
@@ -130,18 +165,33 @@ class LLMClient:
         provider = rag_settings.LLM_PROVIDER
         client_or_tuple = self._get_structured_client()
 
+        # Extract available pages if not provided
+        if available_pages is None and knowledge_available:
+            available_pages = self._extract_available_pages(retrieved_knowledge)
+        elif not knowledge_available:
+            available_pages = []
+
         # Build context-aware prompt
-        if knowledge_available:
-            guidelines_instruction = """You have clinical guidelines available. Use them to support your recommendations.
-                        CRITICAL: Cite actual page numbers from the guidelines in page_references."""
+        if knowledge_available and available_pages:
+            available_pages_str = ", ".join(map(str, available_pages))
+            guidelines_instruction = f"""You have clinical guidelines available from the following pages: {available_pages_str}
+                        
+                        CRITICAL INSTRUCTIONS FOR reference_pages:
+                        1. ONLY cite page numbers from this list: {available_pages_str}
+                        2. DO NOT make up or invent any page numbers
+                        3. Only include pages whose content you actually used in your recommendation
+                        4. If you don't use information from a specific page, don't include it in reference_pages
+                        5. The reference_pages field must be a list of integers (e.g., [385, 386, 401])
+                        6. DO NOT use text format like "Page 350" - only integers like 350"""
+        elif knowledge_available:
+            # Fallback if page extraction failed
+            guidelines_instruction = """You have clinical guidelines available but page numbers could not be extracted.
+                        CRITICAL: In reference_pages, use an empty list [] since specific page numbers are unavailable."""
         else:
             guidelines_instruction = """⚠️ WARNING: No clinical guidelines were retrieved from the knowledge base.
                         You must rely on general dental knowledge.
-                        CRITICAL: In page_references, do NOT cite specific pages. Instead use:
-                        - "Based on general dental practice"
-                        - "Standard clinical guidelines" 
-                        - "General endodontic principles"
-                        DO NOT make up page numbers like "Page 45" or "Chapter 7"."""
+                        CRITICAL: In reference_pages, use an empty list [] since no guidelines were retrieved.
+                        DO NOT make up page numbers."""
 
         # Construct prompt
         prompt = f"""You are a clinical decision support system for dentistry.
@@ -168,13 +218,14 @@ class LLMClient:
                     2. differential_diagnoses: List of 2-3 alternative diagnoses
                     3. recommended_management: Complete treatment plan as ONE STRING with numbered steps
                     Format: "1. First step; 2. Second step; 3. Third step"
-                    4. page_references: {"Actual page numbers from guidelines" if knowledge_available else "Generic references like 'Based on general practice'"}
+                    4. reference_pages: {"List of integer page numbers that you actually used (e.g., [385, 386])" if knowledge_available else "Empty list []"}
 
                     Provide your structured recommendation:"""
 
         logger.info(f"⚙️  Generating structured recommendation...")
         logger.info(f"   Provider: {provider}")
         logger.info(f"   Knowledge available: {knowledge_available}")
+        logger.info(f"   Available pages: {available_pages}")
 
         try:
             if provider == "ollama":
@@ -200,11 +251,28 @@ class LLMClient:
                 response = structured_client.invoke(prompt)
                 result = response.dict()
 
-            logger.info(f"✓ Structured output generated successfully")
+            # POST-PROCESSING: Validate and filter reference pages
+            if result.get("reference_pages"):
+                # Filter to only include pages that were actually available
+                if available_pages:
+                    filtered_pages = [p for p in result["reference_pages"] if p in available_pages]
+                    if len(filtered_pages) != len(result["reference_pages"]):
+                        logger.warning(
+                            f"⚠️  Filtered hallucinated pages: {set(result['reference_pages']) - set(filtered_pages)}"
+                        )
+                    result["reference_pages"] = filtered_pages
+                else:
+                    # No pages available, clear any hallucinated references
+                    logger.warning(
+                        f"⚠️  Clearing hallucinated pages (no pages available): {result['reference_pages']}"
+                    )
+                    result["reference_pages"] = []
+
+            logger.info(f"✅Structured output generated successfully")
             logger.info(f"   Diagnosis: {result['diagnosis'][:100]}...")
             logger.info(f"   Differential diagnoses: {len(result['differential_diagnoses'])} items")
             logger.info(f"   Management: {len(result['recommended_management'])} chars")
-            logger.info(f"   Page references: {len(result['page_references'])} items")
+            logger.info(f"   Reference pages: {result['reference_pages']}")
 
             # Validate output types
             self._validate_output_structure(result)
@@ -219,7 +287,7 @@ class LLMClient:
                 "diagnosis": f"Error generating recommendation: {str(e)}",
                 "differential_diagnoses": [],
                 "recommended_management": "Unable to generate recommendation. Please consult supervising dentist.",
-                "page_references": ["Error - no references available"],
+                "reference_pages": [],
             }
 
     def _validate_output_structure(self, result: Dict) -> None:
@@ -228,7 +296,7 @@ class LLMClient:
             "diagnosis",
             "differential_diagnoses",
             "recommended_management",
-            "page_references",
+            "reference_pages",
         ]
 
         for key in required_keys:
@@ -249,10 +317,15 @@ class LLMClient:
                 f"recommended_management must be string, got {type(result['recommended_management'])}"
             )
 
-        if not isinstance(result["page_references"], list):
-            raise ValueError(f"page_references must be list, got {type(result['page_references'])}")
+        if not isinstance(result["reference_pages"], list):
+            raise ValueError(f"reference_pages must be list, got {type(result['reference_pages'])}")
 
-        logger.info(f"✓ Output structure validated")
+        # Validate all items in reference_pages are integers
+        for page in result["reference_pages"]:
+            if not isinstance(page, int):
+                raise ValueError(f"All items in reference_pages must be integers, got {type(page)}")
+
+        logger.info(f"✅Output structure validated")
 
     def get_model_info(self) -> Dict:
         """Get current LLM configuration."""

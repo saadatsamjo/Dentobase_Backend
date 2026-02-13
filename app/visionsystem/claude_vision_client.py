@@ -15,60 +15,60 @@ logger = logging.getLogger(__name__)
 # Dental radiograph analysis prompt for Claude
 DENTAL_XRAY_PROMPT = """You are analyzing a DENTAL PERIAPICAL RADIOGRAPH.
 
-TASK: Identify all pathologies and anomalies in this dental X-ray image.
+                TASK: Identify all pathologies and anomalies in this dental X-ray image.
 
-IMAGE CONTEXT:
-- This is a medical diagnostic image (periapical radiograph)
-- Shows tooth/teeth with roots and surrounding bone
-- Purpose: Detect abnormalities requiring clinical intervention
+                IMAGE CONTEXT:
+                - This is a medical diagnostic image (periapical radiograph)
+                - Shows tooth/teeth with roots and surrounding bone
+                - Purpose: Detect abnormalities requiring clinical intervention
 
-REQUIRED ANALYSIS:
+                REQUIRED ANALYSIS:
 
-1. IMAGE TYPE & QUALITY:
-   - Confirm: periapical radiograph
-   - Diagnostic quality assessment
+                1. IMAGE TYPE & QUALITY:
+                - Confirm: periapical radiograph
+                - Diagnostic quality assessment
 
-2. VISIBLE ANATOMY:
-   - Tooth/teeth number (if identifiable)
-   - Crown, root(s), pulp chamber
-   - Alveolar bone, PDL, lamina dura
+                2. VISIBLE ANATOMY:
+                - Tooth/teeth number (if identifiable)
+                - Crown, root(s), pulp chamber
+                - Alveolar bone, PDL, lamina dura
 
-3. PATHOLOGY IDENTIFICATION:
+                3. PATHOLOGY IDENTIFICATION:
 
-   DENTAL CARIES:
-   - Dark areas in crown = decay
-   - Specify: tooth, surface, depth
-   
-   PERIAPICAL PATHOLOGY:
-   - Dark zone at root tip = abscess/cyst
-   - Measure size, note characteristics
-   
-   BONE LOSS:
-   - Reduced bone height around root
-   - Type: horizontal/vertical
-   - Severity: mild/moderate/severe
-   
-   RESTORATIONS:
-   - Bright white = metal fillings
-   - Quality assessment
-   
-   ROOT PATHOLOGY:
-   - Resorption, fractures, calcifications
+                DENTAL CARIES:
+                - Dark areas in crown = decay
+                - Specify: tooth, surface, depth
+                
+                PERIAPICAL PATHOLOGY:
+                - Dark zone at root tip = abscess/cyst
+                - Measure size, note characteristics
+                
+                BONE LOSS:
+                - Reduced bone height around root
+                - Type: horizontal/vertical
+                - Severity: mild/moderate/severe
+                
+                RESTORATIONS:
+                - Bright white = metal fillings
+                - Quality assessment
+                
+                ROOT PATHOLOGY:
+                - Resorption, fractures, calcifications
 
-4. RADIOGRAPHIC INTERPRETATION:
-   - Radiolucent (dark) = less dense tissue, decay, infection
-   - Radiopaque (bright) = dense tissue, metal, bone
+                4. RADIOGRAPHIC INTERPRETATION:
+                - Radiolucent (dark) = less dense tissue, decay, infection
+                - Radiopaque (bright) = dense tissue, metal, bone
 
-5. CLINICAL ASSESSMENT:
-   - Primary diagnosis
-   - Severity and urgency
-   - Treatment implications
+                5. CLINICAL ASSESSMENT:
+                - Primary diagnosis
+                - Severity and urgency
+                - Treatment implications
 
-BE SPECIFIC: Use tooth numbers, surface names, measurements when possible.
-USE DENTAL TERMINOLOGY: Proper clinical language.
-STATE CLEARLY: If no pathology detected, say so explicitly.
+                BE SPECIFIC: Use tooth numbers, surface names, measurements when possible.
+                USE DENTAL TERMINOLOGY: Proper clinical language.
+                STATE CLEARLY: If no pathology detected, say so explicitly.
 
-Provide your detailed analysis:"""
+                Provide your detailed analysis:"""
 
 class ClaudeVisionClient:
     """Claude Vision client for dental radiograph analysis."""
@@ -153,12 +153,12 @@ class ClaudeVisionClient:
         if vision_settings.DUAL_PROMPT_ANALYSIS:
             try:
                 pathology_prompt = """List only the pathological findings from this dental X-ray:
-- Caries: present/absent, details if present
-- Periapical lesions: present/absent, details if present  
-- Bone loss: present/absent, details if present
-- Other abnormalities: present/absent, details if present
+                    - Caries: present/absent, details if present
+                    - Periapical lesions: present/absent, details if present  
+                    - Bone loss: present/absent, details if present
+                    - Other abnormalities: present/absent, details if present
 
-Format as concise bullet points."""
+                    Format as concise bullet points."""
                 pathology = self.analyze_image(image, pathology_prompt)
             except Exception as e:
                 logger.error(f"Pathology summary failed: {e}")

@@ -37,8 +37,8 @@ class RAGSettings(BaseSettings):
     EMBEDDING_PROVIDER: Literal["ollama", "huggingface"] = "ollama"
     
     # Ollama Embedding Model (if EMBEDDING_PROVIDER = "ollama")
-    # OLLAMA_EMBEDDING_MODEL: str =    "nomic-embed-text"  
-    OLLAMA_EMBEDDING_MODEL: str =    "mxbai-embed-large"  
+    OLLAMA_EMBEDDING_MODEL: str =    "nomic-embed-text"  
+    # OLLAMA_EMBEDDING_MODEL: str =    "mxbai-embed-large" 
     
     
     # HuggingFace Embedding Model (if EMBEDDING_PROVIDER = "huggingface")
@@ -56,14 +56,14 @@ class RAGSettings(BaseSettings):
     RETRIEVER_TYPE: Literal["similarity", "mmr", "multi_query", "similarity_score_threshold"] = "mmr"
     
     # Number of document chunks to retrieve
-    RETRIEVAL_K: int = 8
+    RETRIEVAL_K: int = 4
     
     # Number of candidates to consider (MMR only)
     FETCH_K: int = 20
     
     # Diversity vs relevance trade-off (MMR only)
     # 0.0 = maximum diversity, 1.0 = maximum relevance
-    LAMBDA_MULT: float = 0.7  # Favor relevance for clinical precision
+    LAMBDA_MULT: float = 0.5 # Favor relevance for clinical precision
     
     # Minimum similarity threshold (optional, None to disable)
     SIMILARITY_THRESHOLD: Optional[float] = 0.6
@@ -84,7 +84,7 @@ class RAGSettings(BaseSettings):
     # DOCUMENT PROCESSING
     # ============================================================================
     # Text chunk size for document splitting
-    CHUNK_SIZE: int = 512  # Optimized for clinical context
+    CHUNK_SIZE: int = 2500  # Optimized for clinical context
     
     # Overlap between chunks (maintains context continuity)
     CHUNK_OVERLAP: int = 100

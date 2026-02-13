@@ -10,6 +10,7 @@ uvx fastapi-new my-app
 
 REPOMIX
 npx repomix --include "folder1/**/*,folder2/**/*,specific-file.py"
+npx repomix --include  "config/**/*,scripts/**/*,app/database/**/*,app/users/user_models/**/*,app/system_models/clinical_note_model/**/*,app/system_models/patient_model/**/*,app/system_models/encounter_model/**/*,app/RAGsystem/**/*,app/visionsystem/**/*,app/cdss_engine/**/*,pyproject.toml,app/main.py"
 
 USING UV
 uv init

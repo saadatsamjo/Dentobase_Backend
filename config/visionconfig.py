@@ -48,8 +48,11 @@ class VisionSettings(BaseSettings):
     
     # Image enhancement for X-rays (LLaVA only)
     ENHANCE_CONTRAST: bool = True  # Improves X-ray visibility
-    CONTRAST_FACTOR: float = 1.5   # 1.0 = no change, >1.0 = more contrast
-    BRIGHTNESS_FACTOR: float = 1.2 # 1.0 = no change, >1.0 = brighter
+    # CONTRAST_FACTOR: float = 1.5   # 1.0 = no change, >1.0 = more contrast
+    # BRIGHTNESS_FACTOR: float = 1.2 # 1.0 = no change, >1.0 = brighter
+    
+    CONTRAST_FACTOR: float = 1.0  # 1.0 = default, >1.0 = more contrast
+    BRIGHTNESS_FACTOR: float = 1.0  # 1.0 = default, >1.0 = brighter
     
     # ============================================================================
     # API SETTINGS (for GPT-4V and Claude)
@@ -58,7 +61,8 @@ class VisionSettings(BaseSettings):
     REQUEST_TIMEOUT: int = 30
     
     # Temperature for vision models (lower = more consistent)
-    VISION_TEMPERATURE: float = 0.2
+    # VISION_TEMPERATURE: float = 0.2
+    VISION_TEMPERATURE: float = 0.0  # Use 0 for clinical consistency
     
     # Maximum tokens for vision analysis
     VISION_MAX_TOKENS: int = 1500
@@ -69,8 +73,7 @@ class VisionSettings(BaseSettings):
     # Whether to perform dual-prompt analysis (detailed + pathology-focused)
     DUAL_PROMPT_ANALYSIS: bool = True
     
-    # Minimum confidence threshold for reporting findings
-    MIN_CONFIDENCE: float = 0.5
+
     
     
     # getting the current vision model

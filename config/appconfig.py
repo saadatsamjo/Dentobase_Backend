@@ -71,4 +71,28 @@ class AppConfig(BaseSettings):
         case_sensitive=False
     )
 
+    LOGGING_CONFIG: dict = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "()": "uvicorn.logging.DefaultFormatter",
+                "fmt": "%(levelname)s:     %(message)s",
+                "use_colors": True,
+            },
+        },
+        "handlers": {
+            "default": {
+                "formatter": "default",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stderr",
+            },
+        },
+        "loggers": {
+            "": {"handlers": ["default"], "level": "INFO"}, # Root logger
+            "uvicorn.error": {"handlers": ["default"], "level": "INFO"},
+            "uvicorn.access": {"propagate": False}, # Let uvicorn handle its own access logs
+        },
+    }
+        
 settings = AppConfig()

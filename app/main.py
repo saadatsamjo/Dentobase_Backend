@@ -1,9 +1,15 @@
 # app/main.py
 from dotenv import load_dotenv
-load_dotenv() # Load environment variables from .env file
+load_dotenv()
+
+import logging.config
+from config.appconfig import settings
 
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
+
+# Apply logging configuration
+logging.config.dictConfig(settings.LOGGING_CONFIG)
 
 # Import routers
 from app.users.auth_routers import router as auth_router
