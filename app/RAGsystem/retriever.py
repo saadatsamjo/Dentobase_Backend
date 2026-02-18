@@ -1,4 +1,7 @@
 # app/RAGsystem/retriever.py
+"""
+Retriever Factory - Fixed for all retriever types
+"""
 from langchain_chroma import Chroma
 from langchain_classic.retrievers import MultiQueryRetriever, ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors import LLMChainExtractor
@@ -26,28 +29,27 @@ class RetrieverFactory:
             )
         return self.vectorstore
     
-    def create_similarity_retriever(self, k: int = None, threshold: float = None):
-        """Standard similarity-based retrieval."""
+    def create_similarity_retriever(self, k: int = None):
+        """
+        Standard similarity-based retrieval.
+        DOES NOT support score_threshold.
+        """
         k = k or rag_settings.RETRIEVAL_K
-        search_kwargs = {"k": k}
-        
-        if threshold or rag_settings.SIMILARITY_THRESHOLD:
-            search_kwargs["score_threshold"] = threshold or rag_settings.SIMILARITY_THRESHOLD
         
         logger.info(f"Creating similarity retriever (k={k})")
         return self._get_vectorstore().as_retriever(
             search_type="similarity",
-            search_kwargs=search_kwargs
+            search_kwargs={"k": k}
         )
     
     def create_mmr_retriever(self, k: int = None, fetch_k: int = None, lambda_mult: float = None):
         """
         Maximal Marginal Relevance - balances relevance with diversity.
-        Best for clinical queries to get comprehensive coverage.
         """
         k = k or rag_settings.RETRIEVAL_K
         fetch_k = fetch_k or rag_settings.FETCH_K
         lambda_mult = lambda_mult or rag_settings.LAMBDA_MULT
+        
         logger.info(f"{'-'*70}")
         logger.info(f"Creating MMR retriever (k={k}, fetch_k={fetch_k}, lambda={lambda_mult})")
         logger.info(f"{'-'*70}")
@@ -64,29 +66,27 @@ class RetrieverFactory:
     def create_multi_query_retriever(self, llm_model: str = None):
         """
         Generates multiple query variations to improve recall.
-        Uses LLM to reformulate the query in different ways.
         """
-        base_retriever = self.create_mmr_retriever(k=4, fetch_k=15)
+        base_retriever = self.create_mmr_retriever(k=4, fetch_k=15, lambda_mult=0.5)
         
         llm = ChatOllama(
-            model=llm_model or rag_settings.OLLAMA_LLM_MODEL,
+            model=llm_model or rag_settings.current_llm_model,
             temperature=0.1
         )
         
         logger.info("Creating multi-query retriever")
-        mutiquery = MultiQueryRetriever.from_llm(
+        multi_query = MultiQueryRetriever.from_llm(
             retriever=base_retriever,
             llm=llm
         )
-        print(f"Created MultiQueryRetriever with {mutiquery.get_relevant_documents(query='management of pulpitis')}")
-        return mutiquery
+        
+        return multi_query
     
     def create_compression_retriever(self, base_retriever=None):
         """
         Uses LLM to filter irrelevant content from retrieved documents.
-        Higher precision but slower. Good for noisy documents.
         """
-        llm = OllamaLLM(model=rag_settings.OLLAMA_LLM_MODEL)
+        llm = OllamaLLM(model=rag_settings.current_llm_model)
         compressor = LLMChainExtractor.from_llm(llm)
         
         base = base_retriever or self.create_mmr_retriever()
@@ -102,20 +102,20 @@ class RetrieverFactory:
         Similarity-based retriever with score threshold.
         """
         k = k or rag_settings.RETRIEVAL_K
-        search_kwargs = {"k": k}
+        threshold = threshold or rag_settings.SIMILARITY_THRESHOLD
         
-        if threshold or rag_settings.SIMILARITY_THRESHOLD:
-            search_kwargs={"k": rag_settings.RETRIEVAL_K, "score_threshold": threshold or rag_settings.SIMILARITY_THRESHOLD}
-        
-        logger.info(f"Creating similarity score threshold retriever (k={k}), with threshold={threshold}")
+        logger.info(f"Creating similarity score threshold retriever (k={k}, threshold={threshold})")
         return self._get_vectorstore().as_retriever(
             search_type="similarity_score_threshold",
-            search_kwargs=search_kwargs
+            search_kwargs={
+                "k": k,
+                "score_threshold": threshold
+            }
         )
     
     def get_retriever(self, retriever_type: str = None):
         """
-        Get retriever based on configuration or specified type.
+        Get retriever based on configuration.
         """
         rtype = retriever_type or rag_settings.RETRIEVER_TYPE
         
@@ -131,14 +131,9 @@ class RetrieverFactory:
             raise ValueError(f"Unknown retriever type: {rtype}")
 
 def get_retriever(persist_dir: str = None, strategy: str = None):
-    """
-    Convenience function for backward compatibility.
-    """
+    """Convenience function for backward compatibility."""
     factory = RetrieverFactory(persist_dir)
     return factory.get_retriever(strategy)
-
-
-
 
 
 

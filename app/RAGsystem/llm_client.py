@@ -1,144 +1,30 @@
 # app/RAGsystem/llm_client.py
 """
-LLM Client with STRUCTURED OUTPUT using Pydantic
-Updated to properly extract page references from retrieved knowledge
+LLM Client - FIXED with simple text parsing (no complex Pydantic)
+This version uses regex-based extraction instead of structured output for reliability with Ollama
 """
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
-
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from config.ragconfig import rag_settings
 
 logger = logging.getLogger(__name__)
 
 
-# ============================================================================
-# PYDANTIC OUTPUT SCHEMAS
-# ============================================================================
-class ClinicalRecommendationOutput(BaseModel):
-    """Structured output schema for LLM recommendations."""
-
-    diagnosis: str = Field(..., description="Primary clinical diagnosis as a single string")
-    differential_diagnoses: list[str] = Field(
-        default_factory=list, description="List of alternative diagnoses to consider"
-    )
-    recommended_management: str = Field(
-        ..., description="Complete treatment plan as a single string with numbered steps"
-    )
-    reference_pages: list[int] = Field(
-        default_factory=list,
-        description="Page numbers from clinical guidelines (integers only). Only include pages that were actually used from the retrieved knowledge. Do NOT invent page numbers.",
-    )
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "diagnosis": "Irreversible pulpitis with periapical abscess, tooth #30",
-                "differential_diagnoses": ["Acute apical periodontitis", "Cracked tooth syndrome"],
-                "recommended_management": "1. Emergency treatment: Pulpectomy or extraction; 2. Pain management with NSAIDs (Ibuprofen 400mg TID); 3. Antibiotics if systemic involvement (Amoxicillin 500mg TID for 7 days); 4. Referral to endodontist for definitive root canal therapy; 5. Follow-up radiograph in 3-6 months.",
-                "reference_pages": [100, 101, 352],
-            }
-        }
-
-
 class LLMClient:
-    """Unified LLM client with structured Pydantic output."""
-
+    """LLM client with simple text-based output parsing (reliable with all providers)"""
+    
     _instance = None
-    _clients = {}
-
+    
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-
-    def _get_structured_client(self):
-        """
-        Get LLM client with structured output.
-
-        Uses .with_structured_output() for OpenAI/Anthropic
-        Falls back to prompt-based JSON for Ollama
-        """
-        provider = rag_settings.LLM_PROVIDER
-
-        logger.info(f"🤖 Initializing {provider} LLM with structured output")
-
-        if provider == "openai":
-            from langchain_openai import ChatOpenAI
-
-            base_client = ChatOpenAI(
-                model=rag_settings.OPENAI_LLM_MODEL, temperature=rag_settings.LLM_TEMPERATURE
-            )
-
-            # Use native structured output
-            return base_client.with_structured_output(
-                ClinicalRecommendationOutput, method="json_mode"
-            )
-
-        elif provider == "claude":
-            from langchain_anthropic import ChatAnthropic
-
-            base_client = ChatAnthropic(
-                model=rag_settings.CLAUDE_LLM_MODEL, temperature=rag_settings.LLM_TEMPERATURE
-            )
-
-            # Use native structured output
-            return base_client.with_structured_output(ClinicalRecommendationOutput)
-
-        elif provider == "ollama":
-            # Ollama doesn't support with_structured_output reliably
-            # Use PydanticOutputParser instead
-            from langchain_core.output_parsers import PydanticOutputParser
-            from langchain_ollama import ChatOllama
-
-            base_client = ChatOllama(
-                model=rag_settings.OLLAMA_LLM_MODEL,
-                temperature=rag_settings.LLM_TEMPERATURE,
-                format="json",
-            )
-
-            parser = PydanticOutputParser(pydantic_object=ClinicalRecommendationOutput)
-
-            # Return tuple of (client, parser) for Ollama
-            return (base_client, parser)
-
-        else:
-            raise ValueError(f"Unknown LLM provider: {provider}")
-
-    def _extract_available_pages(self, retrieved_knowledge: str) -> List[int]:
-        """
-        Extract all page numbers from the retrieved knowledge context.
-        This ensures we only reference pages that were actually retrieved.
-
-        Args:
-            retrieved_knowledge: The formatted knowledge context
-
-        Returns:
-            List of unique page numbers available in the retrieved knowledge
-        """
-        available_pages = set()
-
-        # Match patterns like "Pages [385]" or "Pages 385" or "[1] [Pages 385, 386]"
-        # More flexible pattern to catch various formats
-        page_patterns = [
-            r"Pages?\s*\[([0-9,\s]+)\]",  # Pages [385] or Page [385]
-            r"Pages?\s*([0-9,\s]+)",  # Pages 385 or Pages 385, 386
-            r"\[Pages?\s*([0-9,\s]+)\]",  # [Pages 385] or [Page 385]
-        ]
-
-        for pattern in page_patterns:
-            matches = re.findall(pattern, retrieved_knowledge, re.IGNORECASE)
-            for match in matches:
-                # Extract individual page numbers from comma-separated strings
-                page_nums = re.findall(r"\d+", match)
-                available_pages.update(int(p) for p in page_nums)
-
-        sorted_pages = sorted(list(available_pages))
-        logger.info(f"📖 Available pages from retrieved knowledge: {sorted_pages}")
-        return sorted_pages
-
+    
     def generate_clinical_recommendation(
         self,
         patient_context: str,
@@ -146,201 +32,240 @@ class LLMClient:
         retrieved_knowledge: str,
         query: str,
         knowledge_available: bool,
-        available_pages: List[int] = None,  # NEW PARAMETER
-    ) -> Dict[str, Any]:
+        available_pages: List[int] = None,
+    ) -> Dict:
         """
-        Generate structured clinical recommendation.
-
-        Args:
-            patient_context: Patient demographics and history
-            image_findings: Radiograph analysis results
-            retrieved_knowledge: Retrieved guideline chunks
-            query: Clinical question
-            knowledge_available: Whether any knowledge chunks were retrieved
-            available_pages: List of page numbers actually retrieved (optional, will be extracted if not provided)
-
-        Returns:
-            Dict matching ClinicalRecommendationOutput schema
+        Generate clinical recommendation using SIMPLE text format.
+        
+        This approach is MORE RELIABLE than JSON/Pydantic with local LLMs.
         """
         provider = rag_settings.LLM_PROVIDER
-        client_or_tuple = self._get_structured_client()
-
-        # Extract available pages if not provided
+        logger.info(f"🤖 Generating recommendation with {provider} - Model: {rag_settings.current_llm_model}")
+        
+        # Extract pages from retrieved knowledge if not provided
         if available_pages is None and knowledge_available:
             available_pages = self._extract_available_pages(retrieved_knowledge)
         elif not knowledge_available:
             available_pages = []
-
-        # Build context-aware prompt
-        if knowledge_available and available_pages:
-            available_pages_str = ", ".join(map(str, available_pages))
-            guidelines_instruction = f"""You have clinical guidelines available from the following pages: {available_pages_str}
-                        
-                        CRITICAL INSTRUCTIONS FOR reference_pages:
-                        1. ONLY cite page numbers from this list: {available_pages_str}
-                        2. DO NOT make up or invent any page numbers
-                        3. Only include pages whose content you actually used in your recommendation
-                        4. If you don't use information from a specific page, don't include it in reference_pages
-                        5. The reference_pages field must be a list of integers (e.g., [385, 386, 401])
-                        6. DO NOT use text format like "Page 350" - only integers like 350"""
-        elif knowledge_available:
-            # Fallback if page extraction failed
-            guidelines_instruction = """You have clinical guidelines available but page numbers could not be extracted.
-                        CRITICAL: In reference_pages, use an empty list [] since specific page numbers are unavailable."""
+        
+        # Build SIMPLE prompt (no JSON schema)
+        prompt = self._build_simple_prompt(
+            patient_context,
+            image_findings,
+            retrieved_knowledge,
+            query,
+            available_pages
+        )
+        
+        # Get LLM client
+        llm = self._get_llm_client()
+        
+        try:
+            # Invoke LLM
+            logger.info(f"⚙️  Calling LLM...")
+            response = llm.invoke(prompt)
+            
+            # Parse simple text response
+            result = self._parse_simple_response(response.content, available_pages)
+            
+            logger.info(f"✅ Generated recommendation successfully")
+            logger.info(f"   Diagnosis: {result['diagnosis'][:80]}...")
+            logger.info(f"   Reference pages: {result['reference_pages']}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return self._fallback_response()
+    
+    def _get_llm_client(self):
+        """Get simple LLM client (no structured output)"""
+        provider = rag_settings.LLM_PROVIDER
+        
+        if provider == "ollama":
+            return ChatOllama(
+                model=rag_settings.OLLAMA_LLM_MODEL,
+                temperature=rag_settings.LLM_TEMPERATURE
+            )
+        elif provider == "openai":
+            return ChatOpenAI(
+                model=rag_settings.OPENAI_LLM_MODEL,
+                temperature=rag_settings.LLM_TEMPERATURE
+            )
+        elif provider == "claude":
+            return ChatAnthropic(
+                model=rag_settings.CLAUDE_LLM_MODEL,
+                temperature=rag_settings.LLM_TEMPERATURE
+            )
         else:
-            guidelines_instruction = """⚠️ WARNING: No clinical guidelines were retrieved from the knowledge base.
-                        You must rely on general dental knowledge.
-                        CRITICAL: In reference_pages, use an empty list [] since no guidelines were retrieved.
-                        DO NOT make up page numbers."""
-
-        # Construct prompt
+            raise ValueError(f"Unknown provider: {provider}")
+    
+    def _build_simple_prompt(
+        self,
+        patient_context: str,
+        image_findings: str,
+        retrieved_knowledge: str,
+        query: str,
+        available_pages: List[int]
+    ) -> str:
+        """Build SIMPLE text prompt (much more reliable than JSON)"""
+        
+        pages_str = ", ".join(map(str, available_pages)) if available_pages else "None"
+        
         prompt = f"""You are a clinical decision support system for dentistry.
 
-                    === PATIENT INFORMATION ===
-                    {patient_context}
+=== PATIENT INFORMATION ===
+{patient_context}
 
-                    === RADIOGRAPHIC FINDINGS ===
-                    {image_findings}
+=== RADIOGRAPHIC FINDINGS ===
+{image_findings}
 
-                    === CLINICAL GUIDELINES ===
-                    {retrieved_knowledge}
+=== CLINICAL GUIDELINES ===
+{retrieved_knowledge}
 
-                    === CLINICAL QUERY ===
-                    {query}
+=== AVAILABLE PAGES ===
+You may ONLY reference these page numbers: {pages_str}
+DO NOT invent or make up any page numbers not in this list.
 
-                    === INSTRUCTIONS ===
-                    {guidelines_instruction}
+=== CLINICAL QUERY ===
+{query}
 
-                    Based on the above information, provide a structured clinical recommendation.
+=== CRITICAL INSTRUCTIONS ===
+1. EXTRACT the tooth number from the patient context or clinical notes
+2. Your diagnosis MUST explicitly mention that specific tooth number
+3. Use ONLY page numbers from the available list above
+4. Format your response EXACTLY as shown below (do not add extra sections)
 
-                    REQUIREMENTS:
-                    1. diagnosis: Primary diagnosis as a single descriptive string
-                    2. differential_diagnoses: List of 2-3 alternative diagnoses
-                    3. recommended_management: Complete treatment plan as ONE STRING with numbered steps
-                    Format: "1. First step; 2. Second step; 3. Third step"
-                    4. reference_pages: {"List of integer page numbers that you actually used (e.g., [385, 386])" if knowledge_available else "Empty list []"}
+=== RESPONSE FORMAT ===
+Use this EXACT structure (include the section headers):
 
-                    Provide your structured recommendation:"""
+DIAGNOSIS: [Write complete diagnosis here, MUST include tooth number]
 
-        logger.info(f"⚙️  Generating structured recommendation...")
-        logger.info(f"   Provider: {provider}")
-        logger.info(f"   Knowledge available: {knowledge_available}")
-        logger.info(f"   Available pages: {available_pages}")
+DIFFERENTIAL:
+- [Alternative diagnosis 1]
+- [Alternative diagnosis 2]
 
-        try:
-            if provider == "ollama":
-                # Ollama: use PydanticOutputParser
-                client, parser = client_or_tuple
+MANAGEMENT:
+1. [First treatment step]
+2. [Second treatment step]  
+3. [Third treatment step]
+4. [Fourth treatment step if needed]
 
-                # Add format instructions to prompt
-                format_instructions = parser.get_format_instructions()
-                full_prompt = f"{prompt}\n\n{format_instructions}"
+PAGES: [comma-separated page numbers only, e.g., 385, 388, 401]
 
-                # Invoke
-                response = client.invoke(full_prompt)
-
-                # Parse with Pydantic
-                parsed = parser.parse(response.content)
-                result = parsed.dict()
-
-            else:
-                # OpenAI/Claude: use with_structured_output
-                structured_client = client_or_tuple
-
-                # Invoke directly - returns Pydantic object
-                response = structured_client.invoke(prompt)
-                result = response.dict()
-
-            # POST-PROCESSING: Validate and filter reference pages
-            if result.get("reference_pages"):
-                # Filter to only include pages that were actually available
-                if available_pages:
-                    filtered_pages = [p for p in result["reference_pages"] if p in available_pages]
-                    if len(filtered_pages) != len(result["reference_pages"]):
-                        logger.warning(
-                            f"⚠️  Filtered hallucinated pages: {set(result['reference_pages']) - set(filtered_pages)}"
-                        )
-                    result["reference_pages"] = filtered_pages
-                else:
-                    # No pages available, clear any hallucinated references
-                    logger.warning(
-                        f"⚠️  Clearing hallucinated pages (no pages available): {result['reference_pages']}"
-                    )
-                    result["reference_pages"] = []
-
-            logger.info(f"✅Structured output generated successfully")
-            logger.info(f"   Diagnosis: {result['diagnosis'][:100]}...")
-            logger.info(f"   Differential diagnoses: {len(result['differential_diagnoses'])} items")
-            logger.info(f"   Management: {len(result['recommended_management'])} chars")
-            logger.info(f"   Reference pages: {result['reference_pages']}")
-
-            # Validate output types
-            self._validate_output_structure(result)
-
-            return result
-
-        except Exception as e:
-            logger.error(f"❌ Structured output generation failed: {e}", exc_info=True)
-
-            # Return safe fallback
-            return {
-                "diagnosis": f"Error generating recommendation: {str(e)}",
-                "differential_diagnoses": [],
-                "recommended_management": "Unable to generate recommendation. Please consult supervising dentist.",
-                "reference_pages": [],
-            }
-
-    def _validate_output_structure(self, result: Dict) -> None:
-        """Validate that output matches expected structure."""
-        required_keys = [
-            "diagnosis",
-            "differential_diagnoses",
-            "recommended_management",
-            "reference_pages",
+Now provide your clinical recommendation:"""
+        
+        return prompt
+    
+    def _parse_simple_response(self, text: str, available_pages: List[int]) -> Dict:
+        """
+        Parse simple text format using regex (deterministic, no LLM involved).
+        This is MUCH more reliable than JSON parsing with local LLMs.
+        """
+        logger.info(f"📥 Parsing response ({len(text)} chars)...")
+        
+        # Extract diagnosis
+        diag_match = re.search(
+            r'DIAGNOSIS:\s*(.+?)(?:\n\n|DIFFERENTIAL:|$)', 
+            text, 
+            re.DOTALL | re.IGNORECASE
+        )
+        diagnosis = diag_match.group(1).strip() if diag_match else "Unable to generate diagnosis"
+        
+        # Extract differentials
+        diff_match = re.search(
+            r'DIFFERENTIAL:\s*(.+?)(?:\n\n|MANAGEMENT:|$)', 
+            text, 
+            re.DOTALL | re.IGNORECASE
+        )
+        differentials = []
+        if diff_match:
+            diff_text = diff_match.group(1)
+            # Extract lines starting with dash or number
+            diff_lines = re.findall(r'[-•]\s*(.+?)(?:\n|$)', diff_text)
+            differentials = [d.strip() for d in diff_lines if d.strip()][:3]  # Max 3
+        
+        # Extract management
+        mgmt_match = re.search(
+            r'MANAGEMENT:\s*(.+?)(?:\n\n|PAGES:|$)', 
+            text, 
+            re.DOTALL | re.IGNORECASE
+        )
+        management = mgmt_match.group(1).strip() if mgmt_match else "Consult supervising dentist for treatment plan."
+        
+        # Extract pages
+        pages_match = re.search(
+            r'PAGES:\s*(.+?)(?:\n|$)', 
+            text, 
+            re.IGNORECASE
+        )
+        pages = []
+        if pages_match:
+            # Extract all numbers
+            page_nums = re.findall(r'\d+', pages_match.group(1))
+            # Filter to only available pages (validation)
+            pages = [int(p) for p in page_nums if int(p) in available_pages]
+        
+        logger.info(f"✅ Parsed successfully:")
+        logger.info(f"   Diagnosis: {len(diagnosis)} chars")
+        logger.info(f"   Differentials: {len(differentials)}")
+        logger.info(f"   Management: {len(management)} chars")
+        logger.info(f"   Pages: {pages}")
+        
+        return {
+            "diagnosis": diagnosis,
+            "differential_diagnoses": differentials,
+            "recommended_management": management,
+            "reference_pages": pages
+        }
+    
+    def _extract_available_pages(self, retrieved_knowledge: str) -> List[int]:
+        """
+        Extract all page numbers from retrieved knowledge context.
+        Ensures we only reference pages that were actually retrieved.
+        """
+        available_pages = set()
+        
+        # Match patterns like "Pages [385]" or "[1] Pages [385, 386]"
+        page_patterns = [
+            r'Pages?\s*\[([0-9,\s]+)\]',  # Pages [385]
+            r'Pages?\s*([0-9,\s]+)',      # Pages 385, 386
+            r'\[Pages?\s*([0-9,\s]+)\]',  # [Pages 385]
         ]
-
-        for key in required_keys:
-            if key not in result:
-                raise ValueError(f"Missing required key: {key}")
-
-        # Type checks
-        if not isinstance(result["diagnosis"], str):
-            raise ValueError(f"diagnosis must be string, got {type(result['diagnosis'])}")
-
-        if not isinstance(result["differential_diagnoses"], list):
-            raise ValueError(
-                f"differential_diagnoses must be list, got {type(result['differential_diagnoses'])}"
-            )
-
-        if not isinstance(result["recommended_management"], str):
-            raise ValueError(
-                f"recommended_management must be string, got {type(result['recommended_management'])}"
-            )
-
-        if not isinstance(result["reference_pages"], list):
-            raise ValueError(f"reference_pages must be list, got {type(result['reference_pages'])}")
-
-        # Validate all items in reference_pages are integers
-        for page in result["reference_pages"]:
-            if not isinstance(page, int):
-                raise ValueError(f"All items in reference_pages must be integers, got {type(page)}")
-
-        logger.info(f"✅Output structure validated")
-
+        
+        for pattern in page_patterns:
+            matches = re.findall(pattern, retrieved_knowledge, re.IGNORECASE)
+            for match in matches:
+                page_nums = re.findall(r'\d+', match)
+                available_pages.update(int(p) for p in page_nums)
+        
+        sorted_pages = sorted(list(available_pages))
+        logger.info(f"📖 Extracted pages from knowledge: {sorted_pages}")
+        return sorted_pages
+    
+    def _fallback_response(self) -> Dict:
+        """Fallback response if generation completely fails"""
+        return {
+            "diagnosis": "Unable to generate recommendation - system error. Please consult supervising dentist.",
+            "differential_diagnoses": [],
+            "recommended_management": "1. Comprehensive clinical examination; 2. Additional diagnostic imaging if needed; 3. Consult supervising dentist for diagnosis and treatment planning.",
+            "reference_pages": []
+        }
+    
     def get_model_info(self) -> Dict:
-        """Get current LLM configuration."""
+        """Get current LLM configuration"""
         return {
             "provider": rag_settings.LLM_PROVIDER,
             "model": rag_settings.current_llm_model,
             "temperature": rag_settings.LLM_TEMPERATURE,
-            "structured_output": True,
-            "parser": (
-                "with_structured_output"
-                if rag_settings.LLM_PROVIDER in ["openai", "claude"]
-                else "PydanticOutputParser"
-            ),
+            "structured_output": False,  # Using simple text parsing
+            "parser": "regex",
+            "reliable": True  # Text parsing is much more reliable
         }
 
 
 # Global instance
 llm_client = LLMClient()
+

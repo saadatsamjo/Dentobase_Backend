@@ -14,8 +14,10 @@ class ClinicalRAGChain:
     def __init__(self, retriever):
         self.retriever = retriever
         self.llm = ChatOllama(
-            model=rag_settings.OLLAMA_LLM_MODEL,
-            temperature=rag_settings.LLM_TEMPERATURE
+            model=rag_settings.current_llm_model,
+            temperature=rag_settings.LLM_TEMPERATURE,
+            # format=rag_settings.FORMAT
+            format="json"
         )
         
         # Clinical system prompt
@@ -27,7 +29,12 @@ class ClinicalRAGChain:
             2. Cite specific page numbers [Page X] for every recommendation
             3. If insufficient information, state: "Insufficient information in retrieved guidelines"
             4. Distinguish pharmacological vs non-pharmacological treatments
-            5. Note any precautions or contraindications mentioned"""
+            5. Note any precautions or contraindications mentioned
+            6. Do NOT describe the schema.
+            7. Do NOT output the schema definition.
+            8. Output ONLY the resulting JSON object.
+            9. Do not include markdown formatting (no ```json ... ```).
+            """
         
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", self.system_prompt),

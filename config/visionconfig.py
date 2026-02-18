@@ -1,98 +1,145 @@
 # config/visionconfig.py
 """
-Vision System Configuration
-Controls which vision model is used for dental radiograph analysis
+Vision Model Configuration - COMPLETE AND ORGANIZED
+Supports: LLaVA (7B/13B/Llama3.2), LLaVA-Med, GPT-4V, Claude, Florence, BiomedCLIP
 """
-from pydantic_settings import BaseSettings
 from typing import Literal
 
+from pydantic import Field
+from pydantic_settings import BaseSettings
+
+
 class VisionSettings(BaseSettings):
-    """Configuration for Vision Models"""
+    """Configuration for all vision models in the system"""
     
-    # ============================================================================
-    # VISION MODEL SELECTION
-    # ============================================================================
-    # Choose which vision model to use for image analysis
-    # Options: "llava", "gpt4v", "claude", "florence"
-    # 
-    # Recommendations:
-    #   - "llava" (default): Free, local, good for development
-    #   - "llava:13b": Better accuracy, requires 16GB RAM
-    #   - "gpt4v": Best accuracy, costs ~$0.01/image
-    #   - "claude": Excellent medical reasoning, ~$0.01/image
-    #   - "florence": Fast but poor on medical images (NOT recommended)
-    VISION_MODEL_PROVIDER: Literal["llava", "gpt4v", "claude", "florence"] = "llava"
+    # ========================================================================
+    # PRIMARY VISION MODEL SELECTION
+    # ========================================================================
+    # Choose which model to use for analysis
+    # Options: "llava", "llava_med", "biomedclip", "gpt4v", "claude", "florence"
+    #
+    # RECOMMENDATIONS (based on your ollama list):
+    #   LOCAL MODELS (Free, No API):
+    #   - "llava" with LLAVA_MODEL="llava:13b" → Best open-source option
+    #   - "llava" with LLAVA_MODEL="llama3.2-vision" → Latest from Meta
+    #   - "llava_med" → Medical-specific (HuggingFace transformers)
+    #   - "biomedclip" → Medical classifier (good for pathology detection)
+    #
+    #   PROPRIETARY (API costs):
+    #   - "gpt4v" → Best accuracy ($0.01/image)
+    #   - "claude" → Excellent reasoning ($0.01/image)
+    #
+    #   NOT RECOMMENDED:
+    #   - "florence" → Poor on dental X-rays
     
-    # ============================================================================
-    # LLAVA SPECIFIC SETTINGS (if VISION_MODEL_PROVIDER = "llava")
-    # ============================================================================
-    # LLaVA Model Size Selection
-    # Options: "llava" (7B), "llava:13b" (13B), "llava:34b" (34B)
-    LLAVA_MODEL: str = "llava"  # Change to "llava:13b" for production
+    VISION_MODEL_PROVIDER: Literal["florence", "llava", "llava_med", "biomedclip", "gpt4v", "claude"] = "biomedclip"
     
-    # ============================================================================
-    # FLORENCE SETTINGS (if VISION_MODEL_PROVIDER = "florence")
-    # ============================================================================
-    # NOT RECOMMENDED for dental X-rays - included for completeness
-    FLORENCE_MODEL_NAME: str = "microsoft/Florence-2-base"
-    # Alternative: "microsoft/Florence-2-large" (slower, marginally better)
     
-    # ============================================================================
-    # IMAGE PROCESSING SETTINGS
-    # ============================================================================
-    # Maximum image dimension (images resized to fit, maintaining aspect ratio)
-    MAX_IMAGE_SIZE: int = 1024
+    # ========================================================================
+    # LLAVA SETTINGS (Ollama models)
+    # ========================================================================
+    # Your available models from `ollama list`:
+    # - llava:latest - Fast but less accurate
+    # - llava:13b - RECOMMENDED for production
+    # - llama3.2-vision - Latest from Meta, good performance
     
-    # Supported image formats
+    # LLAVA_MODEL: str = "llava:latest" 
+    # LLAVA_MODEL: str = "llava:13b" 
+    LLAVA_MODEL: str = "llama3.2-vision" 
+    
+    
+    # ========================================================================
+    # LLAVA-MED SETTINGS (HuggingFace transformers)
+    # ========================================================================
+    # Medical-specific vision model via transformers library
+    # Downloads model from HuggingFace on first use
+    # Available models from your search:
+    # - mradermacher/llava-med-v1.5-mistral-7b-GGUF (recommended)
+    # - sbottazzi/LLaVA-Med_weights_gguf
+    
+    # LLAVA_MED_MODEL: str = "sbottazzi/LLaVA-Med_weights_gguf"
+    # LLAVA_MED_MODEL: str = "microsoft/llava-med-v1.5-mistral-7b"
+    LLAVA_MED_MODEL: str = "mradermacher/llava-med-v1.5-mistral-7b-GGUF"
+    LLAVA_MED_DEVICE: str = "cpu"
+    
+    
+    # ========================================================================
+    # BIOMEDCLIP SETTINGS (HuggingFace transformers)
+    # ========================================================================
+    # Medical image classifier trained on 15M medical images
+    # Good for pathology detection
+    
+    BIOMEDCLIP_MODEL: str = "microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
+    BIOMEDCLIP_DEVICE: str = "cpu"
+    
+    
+    # ========================================================================
+    # FLORENCE SETTINGS (HuggingFace - NOT RECOMMENDED)
+    # ========================================================================
+    # You have these cached already:
+    # - microsoft/Florence-2-base (465MB)
+    # - microsoft/Florence-2-large (1.6GB)
+    
+    # FLORENCE_MODEL_NAME: str = "microsoft/Florence-2-base"
+    FLORENCE_MODEL_NAME: str = "microsoft/Florence-2-large"
+    
+    
+    # ========================================================================
+    # PROPRIETARY API KEYS
+    # ========================================================================
+    OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
+    ANTHROPIC_API_KEY: str = Field(default="", env="ANTHROPIC_API_KEY")
+    
+    
+    # ========================================================================
+    # IMAGE PROCESSING
+    # ========================================================================
+    MAX_IMAGE_SIZE: int = 1024  # Max dimension
     SUPPORTED_FORMATS: list = ["image/jpeg", "image/png", "image/webp"]
     
-    # Image enhancement for X-rays (LLaVA only)
-    ENHANCE_CONTRAST: bool = True  # Improves X-ray visibility
-    # CONTRAST_FACTOR: float = 1.5   # 1.0 = no change, >1.0 = more contrast
-    # BRIGHTNESS_FACTOR: float = 1.2 # 1.0 = no change, >1.0 = brighter
+    # X-ray enhancement (only for LLaVA)
+    ENHANCE_CONTRAST: bool = False
+    CONTRAST_FACTOR: float = 1.5
+    BRIGHTNESS_FACTOR: float = 1.2
     
-    CONTRAST_FACTOR: float = 1.0  # 1.0 = default, >1.0 = more contrast
-    BRIGHTNESS_FACTOR: float = 1.0  # 1.0 = default, >1.0 = brighter
     
-    # ============================================================================
-    # API SETTINGS (for GPT-4V and Claude)
-    # ============================================================================
-    # Request timeout for API calls (seconds)
+    # ========================================================================
+    # ANALYSIS SETTINGS
+    # ========================================================================
+    VISION_TEMPERATURE: float = 0.0  # Deterministic for clinical use
+    VISION_MAX_TOKENS: int = 1500
     REQUEST_TIMEOUT: int = 30
     
-    # Temperature for vision models (lower = more consistent)
-    # VISION_TEMPERATURE: float = 0.2
-    VISION_TEMPERATURE: float = 0.0  # Use 0 for clinical consistency
+    # Whether to include clinical notes in vision prompt
+    # (disabled for Florence due to token limits)
+    INCLUDE_CLINICAL_NOTES_IN_VISION_MODEL_PROMPT: bool = True
     
-    # Maximum tokens for vision analysis
-    VISION_MAX_TOKENS: int = 1500
-    
-    # ============================================================================
-    # CLINICAL ANALYSIS SETTINGS
-    # ============================================================================
-    # Whether to perform dual-prompt analysis (detailed + pathology-focused)
+    # Dual-prompt analysis (detailed + pathology-focused)
     DUAL_PROMPT_ANALYSIS: bool = True
     
-
     
-    
-    # getting the current vision model
+    # ========================================================================
+    # HELPER PROPERTIES
+    # ========================================================================
     @property
-    def current_llm_model(self) -> str:
-        """Get the active LLM model based on provider."""
+    def current_vision_model(self) -> str:
+        """Get the active model name for display"""
         if self.VISION_MODEL_PROVIDER == "llava":
             return self.LLAVA_MODEL
+        elif self.VISION_MODEL_PROVIDER == "llava_med":
+            return self.LLAVA_MED_MODEL
+        elif self.VISION_MODEL_PROVIDER == "biomedclip":
+            return self.BIOMEDCLIP_MODEL
         elif self.VISION_MODEL_PROVIDER == "gpt4v":
             return "gpt-4-vision-preview"
         elif self.VISION_MODEL_PROVIDER == "claude":
             return "claude-3-5-sonnet-20241022"
         else:  # florence
             return self.FLORENCE_MODEL_NAME
-        
+    
     class Config:
         env_file = ".env"
         extra = "ignore"
-    
-    
+
 
 vision_settings = VisionSettings()

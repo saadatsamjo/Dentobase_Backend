@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     print("\n===============================================================================")
     print("===============================================================================")
     print(f" 🚀 Starting CDSS Server")
-    print(f" ✅ Vision Model: {vision_settings.VISION_MODEL_PROVIDER} - {vision_settings.current_llm_model}")
+    print(f" ✅ Vision Model: {vision_settings.VISION_MODEL_PROVIDER} - {vision_settings.current_vision_model}")
     print(f" ✅ RAG Embeddings Provider: {rag_settings.EMBEDDING_PROVIDER} - {rag_settings.current_embedding_model}")
     print(f" ✅ Chunk Size: {rag_settings.CHUNK_SIZE}")
     print(f" ✅ Chunk Overlap: {rag_settings.CHUNK_OVERLAP}")

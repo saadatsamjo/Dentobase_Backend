@@ -18,7 +18,9 @@ class RAGSettings(BaseSettings):
     LLM_PROVIDER: Literal["ollama", "openai", "claude"] = "ollama"
     
     # Ollama LLM Model (if LLM_PROVIDER = "ollama")
-    OLLAMA_LLM_MODEL: str = "llama3:8b"
+    # OLLAMA_LLM_MODEL: str = "llama3:8b"
+    OLLAMA_LLM_MODEL: str = "llama3.1:8b"
+    # OLLAMA_LLM_MODEL: str = "mixtral:8x7b"
     # Alternatives: "llama3:70b", "mistral", "mixtral:8x7b"
     
     # OpenAI Model (if LLM_PROVIDER = "openai")
@@ -56,14 +58,18 @@ class RAGSettings(BaseSettings):
     RETRIEVER_TYPE: Literal["similarity", "mmr", "multi_query", "similarity_score_threshold"] = "mmr"
     
     # Number of document chunks to retrieve
-    RETRIEVAL_K: int = 4
+    RETRIEVAL_K: int = 8
     
     # Number of candidates to consider (MMR only)
     FETCH_K: int = 20
     
     # Diversity vs relevance trade-off (MMR only)
-    # 0.0 = maximum diversity, 1.0 = maximum relevance
-    LAMBDA_MULT: float = 0.5 # Favor relevance for clinical precision
+    # MMR Lambda Trade-off: 1.0 = Pure Semantic Relevance, 0.0 = Pure Diversity
+    # Use 1.0 for high-stakes precision where you only want the absolute best matches.
+    # This treats it like a standard similarity search (e.g., finding a specific lab value).
+    LAMBDA_MULT: float = 1.0
+    
+    
     
     # Minimum similarity threshold (optional, None to disable)
     SIMILARITY_THRESHOLD: Optional[float] = 0.6
@@ -73,6 +79,7 @@ class RAGSettings(BaseSettings):
     # ============================================================================
     # Temperature (0 = deterministic, 1 = creative)
     LLM_TEMPERATURE: float = 0.0  # Use 0 for clinical consistency
+    FORMAT: Literal["json", "markdown"] = "json"
     
     # Maximum tokens in LLM response
     MAX_TOKENS: int = 1500

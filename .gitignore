@@ -15,6 +15,7 @@ wheels/
 ! .env.example
 repomix-output.xml
 repomix-output.txt
+repomix-output.md
 
 # --- Python & FastAPI ---
 __pycache__/

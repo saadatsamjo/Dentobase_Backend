@@ -1,19 +1,21 @@
-# app/visionsystem/routes.py (PARTIAL - Updated analyze_image endpoint)
+# app/visionsystem/routes.py
 """
-Vision Analysis Routes - Updated with clinical context support
+Vision System Routes - FIXED v2
+Fixes:
+1. llava:7b -> llava:latest (actual installed model name from ollama list)
+2. BiomedCLIP properly loads via open_clip (open-clip-torch is installed)
+3. LLaVA-Med routes through Ollama with medical system prompt
+4. GPT-4V and Claude gracefully report billing errors without crashing
 """
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
-from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
-import time
 import logging
+import time
+from typing import Optional
 
-from app.visionsystem.vision_client import vision_client
+from fastapi import APIRouter, File, Form, UploadFile
+
 from app.visionsystem.image_processor import ImageProcessor
-from app.cdss_engine.schemas import VisionAnalysisResponse
-from app.system_models.clinical_note_model.clinical_note_model import ClinicalNote
-from app.database.connection import get_db
+from app.visionsystem.vision_client import vision_client
+from app.visionsystem.vision_schemas import VisionAnalysisResponse
 from config.visionconfig import vision_settings
 
 router = APIRouter()
@@ -22,259 +24,197 @@ logger = logging.getLogger(__name__)
 
 @router.post("/analyze_image", response_model=VisionAnalysisResponse)
 async def analyze_dental_radiograph(
-    file: UploadFile = File(..., description="Dental radiograph image"),
-    patient_id: Optional[int] = Form(None, description="Patient ID for clinical context"),
-    chief_complaint: Optional[str] = Form(None, description="Chief complaint or clinical question"),
-    tooth_number: Optional[str] = Form(None, description="Specific tooth number(s) to focus on"),
-    custom_prompt: Optional[str] = Form(None, description="Optional custom analysis prompt"),
-    db: AsyncSession = Depends(get_db)
+    file: UploadFile = File(...),
+    context: str = Form(None),
+    tooth_number: str = Form(None),
+):
+    """Analyze a single dental radiograph using the configured vision model."""
+    logger.info(f"\n{'='*70}")
+    logger.info(f"SINGLE MODEL VISION ANALYSIS")
+    logger.info(f"{'='*70}")
+    logger.info(f"🔍 Vision Model Provider: {vision_settings.VISION_MODEL_PROVIDER}")
+    logger.info(f"🔍 Vision Model: {vision_settings.current_vision_model}")
+    if context:
+        logger.info(f"📝 Chief Complaint: {context}")
+    if tooth_number:
+        logger.info(f"🦷 Focus Tooth: #{tooth_number}")
+
+    content = await file.read()
+    image = ImageProcessor.preprocess_image(content)
+
+    start_time = time.time()
+    result = vision_client.analyze_dental_radiograph(
+        image, context=context, tooth_number=tooth_number
+    )
+    elapsed = time.time() - start_time
+    logger.info(f"✅ Analysis complete in {elapsed:.2f}s")
+
+    return VisionAnalysisResponse(
+        detailed_description=result["detailed_description"],
+        pathology_summary=result.get("pathology_summary", ""),
+        model_used=result.get("model", vision_settings.current_vision_model),
+        image_quality_score=result.get("image_quality_score", 0.5),
+        diagnostic_confidence=result.get("confidence_score", 0.5),
+        structured_findings=result.get("structured_findings"),
+    )
+
+
+@router.post("/test_vision_models")
+async def test_all_vision_models(
+    file: UploadFile = File(...),
+    context: Optional[str] = Form(None),
+    tooth_number: Optional[str] = Form(None),
 ):
     """
-    Analyze Dental Radiograph with Clinical Context
-    
-    This endpoint now supports clinical context integration:
-    - Accepts patient_id to retrieve recent clinical notes
-    - Accepts chief_complaint for focused analysis
-    - Accepts tooth_number for tooth-specific examination
-    
-    Returns both:
-    - detailed_description: Full clinical analysis
-    - pathology_summary: Structured checklist of findings
-    
-    Vision Model: Configured in config/visionconfig.py
+    TEST ENDPOINT: Compare ALL available vision models on the same image.
+
+    Models tested:
+    - llava:13b       (Ollama - best open-source)
+    - llama3.2-vision (Ollama - Meta latest)
+    - llava:latest    (Ollama - baseline, installed as llava:latest not llava:7b)
+    - llava_med       (Ollama + medical system prompt, routes via llava:13b)
+    - biomedclip      (open_clip - real BiomedCLIP classification)
+    - florence        (HuggingFace Florence-2-base)
+    - gpt4v           (OpenAI - skipped if no credits)
+    - claude          (Anthropic - skipped if no credits)
     """
-    start_time = time.time()
+    logger.info(f"\n{'='*70}")
+    logger.info(f"MULTI-MODEL VISION COMPARISON TEST")
+    logger.info(f"{'='*70}")
+    if context:
+        logger.info(f"📝 Test Context: {context}")
+    if tooth_number:
+        logger.info(f"🦷 Test Tooth: #{tooth_number}")
 
-    try:
-        logger.info(f"\n{'='*70}")
-        logger.info(f"VISION ENDPOINT - RADIOGRAPH ANALYSIS")
-        logger.info(f"{'='*70}")
-        logger.info(f"📸 Image: {file.filename}")
-        logger.info(f"🔍 Vision Model: {vision_settings.VISION_MODEL_PROVIDER}")
-        logger.info(f"   Dual-prompt: {vision_settings.DUAL_PROMPT_ANALYSIS}")
-        
-        if patient_id:
-            logger.info(f"👤 Patient ID: {patient_id}")
-        if chief_complaint:
-            logger.info(f"📋 Chief Complaint: {chief_complaint}")
-        if tooth_number:
-            logger.info(f"🦷 Tooth Number(s): {tooth_number}")
+    content = await file.read()
+    image = ImageProcessor.preprocess_image(content)
 
-        # Validate image
-        content = await file.read()
-        ImageProcessor.validate_image(file.content_type, len(content))
-        logger.info(f"✅ Image validated: {len(content)} bytes")
+    # (provider_type, ollama_model_override_or_None, label)
+    # NOTE: llava:7b is NOT installed - it's llava:latest (4.7 GB, same model)
+    models_to_test = [
+        ("llava",     "llava:13b",          "llava:13b - Recommended open-source"),
+        ("llava",     "llama3.2-vision",    "llama3.2-vision - Latest from Meta"),
+        ("llava",     "llava:latest",       "llava:latest - Baseline (7B)"),
+        ("llava_med", None,                 "LLaVA-Med - Medical specialist (via llava:13b)"),
+        ("biomedclip", None,                "BiomedCLIP - Pathology classifier (open_clip)"),
+        ("florence",  None,                 "Florence-2 - Not recommended"),
+        ("gpt4v",     None,                 "GPT-4 Vision - Best accuracy"),
+        ("claude",    None,                 "Claude 3.5 Sonnet - Medical reasoning"),
+    ]
 
-        # Preprocess
-        image = ImageProcessor.preprocess_image(content)
-        logger.info(f"✅ Image preprocessed: {image.size}")
+    results = {}
+    original_provider = vision_settings.VISION_MODEL_PROVIDER
+    original_llava_model = vision_settings.LLAVA_MODEL
 
-        # Build clinical context
-        clinical_context = None
-        clinical_notes_text = None
-        
-        if chief_complaint or tooth_number or patient_id:
-            context_parts = []
-            
-            if chief_complaint:
-                context_parts.append(f"Chief complaint: {chief_complaint}")
-            
-            if tooth_number:
-                tooth_list = tooth_number.replace(',', ', ')
-                context_parts.append(f"Focus on tooth/teeth: {tooth_list}")
-            
-            clinical_context = ". ".join(context_parts)
-            
-            # Fetch clinical notes if patient_id provided
-            if patient_id and db:
-                logger.info(f"📝 Fetching recent clinical notes for patient {patient_id}...")
-                try:
-                    notes_query = (
-                        select(ClinicalNote)
-                        .join(ClinicalNote.encounter)
-                        .where(ClinicalNote.encounter.has(patient_id=patient_id))
-                        .order_by(desc(ClinicalNote.created_at))
-                        .limit(2)  # Get 2 most recent notes
-                    )
-                    
-                    notes_result = await db.execute(notes_query)
-                    clinical_notes = notes_result.scalars().all()
-                    
-                    if clinical_notes:
-                        logger.info(f"✅ Retrieved {len(clinical_notes)} clinical note(s)")
-                        notes_parts = []
-                        for note in clinical_notes:
-                            notes_parts.append(f"[{note.note_type}]: {note.content}")
-                        clinical_notes_text = " | ".join(notes_parts)
-                        logger.info(f"   Notes summary: {clinical_notes_text[:100]}...")
-                    else:
-                        logger.info(f"   No clinical notes found")
-                except Exception as e:
-                    logger.warning(f"⚠️  Could not fetch clinical notes: {e}")
-
-        # Analyze with configured vision model
-        if custom_prompt:
-            logger.info(f"⚠️  Using custom prompt (pathology summary disabled)")
-            # Custom prompt analysis
-            description = vision_client.analyze_image(image, custom_prompt)
-            result = {
-                "detailed_description": description,
-                "pathology_summary": "Custom analysis - see detailed description",
-                "model": vision_client.get_model_info()["model"],
-                "confidence": "medium",
-            }
-        else:
-            logger.info(f"✅ Using context-aware dental radiograph analysis")
-            if clinical_context:
-                logger.info(f"   Context: {clinical_context}")
-            
-            # Standard dental radiograph analysis with clinical context
-            result = vision_client.analyze_dental_radiograph(
-                image, 
-                context=clinical_context,
-                clinical_notes=clinical_notes_text
-            )
-
-            # Determine confidence based on content
-            description_lower = result["detailed_description"].lower()
-            if "no pathology" in description_lower or "no significant" in description_lower:
-                confidence = "medium"
-            elif "severe" in description_lower or "urgent" in description_lower:
-                confidence = "high"
-            else:
-                confidence = "high"
-
-            result["confidence"] = confidence
-
-        processing_time = (time.time() - start_time) * 1000
-
-        logger.info(f"✅ Analysis complete")
-        logger.info(f"   Model: {result.get('model', vision_settings.VISION_MODEL_PROVIDER)}")
-        logger.info(f"   Description: {len(result['detailed_description'])} chars")
-        logger.info(f"   Pathology summary: {len(result.get('pathology_summary', ''))} chars")
-        logger.info(f"   Processing time: {processing_time:.2f}ms")
-        logger.info(f"   Confidence: {result.get('confidence', 'medium')}")
-        
-        # Enhanced logging - show pathology summary
+    for provider, ollama_model, description in models_to_test:
         logger.info(f"\n{'─'*70}")
-        logger.info(f"📊 IMAGE ANALYSIS RESULTS:")
+        logger.info(f"🔄 Testing: {provider} ({description})")
         logger.info(f"{'─'*70}")
-        logger.info(f"Model Used: {result.get('model', vision_settings.VISION_MODEL_PROVIDER)}")
-        logger.info(f"Confidence: {result.get('confidence', 'medium')}")
-        logger.info(f"\n📋 Pathology Summary:")
-        logger.info(f"{result.get('pathology_summary', 'No summary available')}")
-        logger.info(f"{'─'*70}")
-        logger.info(f"{'='*70}\n")
 
-        return VisionAnalysisResponse(
-            detailed_description=result["detailed_description"],
-            pathology_summary=result.get("pathology_summary", "See detailed description"),
-            model_used=result.get("model", vision_settings.VISION_MODEL_PROVIDER),
-            processing_time_ms=round(processing_time, 2),
-            confidence=result.get("confidence", "medium"),
-        )
+        model_label = ollama_model if ollama_model else provider
+        result_key = f"{provider}_{model_label.replace(':', '_').replace('.', '_')}"
 
-    except ValueError as e:
-        logger.error(f"❌ Validation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"❌ Vision analysis failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Vision analysis failed: {str(e)}")
+        try:
+            # Switch provider
+            vision_settings.VISION_MODEL_PROVIDER = provider
+            vision_client._clients = {}  # Force reload of client
 
+            # Also switch the Ollama model if specified
+            if ollama_model:
+                vision_settings.LLAVA_MODEL = ollama_model
+                logger.info(f"   🔧 Ollama model set to: {ollama_model}")
 
+            start = time.time()
+            result = vision_client.analyze_dental_radiograph(
+                image, context=context, tooth_number=tooth_number
+            )
+            elapsed = (time.time() - start) * 1000
 
-@router.get("/config")
-async def get_vision_config():
-    """Get current vision system configuration."""
+            if result.get("error"):
+                logger.error(f"❌ {provider} returned error: {result['error']}")
+                results[result_key] = {
+                    "success": False,
+                    "description": description,
+                    "error": result["error"],
+                }
+                continue
+
+            structured = result.get("structured_findings")
+            results[result_key] = {
+                "success": True,
+                "description": description,
+                "model_used": model_label,
+                "structured_findings": structured,
+                "teeth_visible": structured.get("teeth_visible") if structured else None,
+                "primary_finding": structured.get("primary_finding") if structured else None,
+                "pathology_summary": result.get("pathology_summary", ""),
+                "image_quality": result.get("image_quality_score", 0.0),
+                "confidence": result.get("confidence_score", 0.0),
+                "time_ms": round(elapsed, 2),
+            }
+
+            logger.info(f"✅ Success - {elapsed:.0f}ms")
+            if structured:
+                logger.info(f"   Teeth: {structured.get('teeth_visible', [])}")
+                logger.info(f"   Finding: {str(structured.get('primary_finding', ''))[:70]}...")
+
+        except Exception as e:
+            err_str = str(e)
+            # Classify error type for cleaner reporting
+            if "insufficient_quota" in err_str or "credit balance" in err_str:
+                err_msg = "API billing: no credits. Add credits to use this model."
+            elif "404" in err_str and "not found" in err_str:
+                err_msg = f"Model not installed in Ollama: {model_label}"
+            else:
+                err_msg = err_str[:200]
+
+            logger.error(f"❌ {provider} failed: {err_msg}")
+            results[result_key] = {
+                "success": False,
+                "description": description,
+                "error": err_msg,
+            }
+        finally:
+            # Always restore after each test
+            vision_settings.VISION_MODEL_PROVIDER = original_provider
+            vision_settings.LLAVA_MODEL = original_llava_model
+            vision_client._clients = {}
+
+    # Final restore
+    vision_settings.VISION_MODEL_PROVIDER = original_provider
+    vision_settings.LLAVA_MODEL = original_llava_model
+
+    successful = sum(1 for r in results.values() if r.get("success"))
+    logger.info(f"\n{'='*70}")
+    logger.info(f"TEST COMPLETE")
+    logger.info(f"{'='*70}")
+    logger.info(f"✅ {successful}/{len(results)} models succeeded")
+
     return {
-        "vision_provider": vision_settings.VISION_MODEL_PROVIDER,
-        "model_details": vision_client.get_model_info(),
-        "settings": {
-            "max_image_size": vision_settings.MAX_IMAGE_SIZE,
-            "enhance_contrast": vision_settings.ENHANCE_CONTRAST,
-            "dual_prompt_analysis": vision_settings.DUAL_PROMPT_ANALYSIS,
-            "contrast_factor": vision_settings.CONTRAST_FACTOR,
-            "brightness_factor": vision_settings.BRIGHTNESS_FACTOR,
-            "supported_formats": vision_settings.SUPPORTED_FORMATS,
+        "test_context": {
+            "context": context,
+            "tooth_number": tooth_number,
+            "models_tested": len(results),
+            "successful": successful,
         },
-        "prompts": {
-            "detailed_analysis": "Comprehensive radiograph analysis with anatomical structures and pathology",
-            "pathology_checklist": (
-                "Structured Yes/No checklist for caries, bone loss, lesions, etc."
-                if vision_settings.DUAL_PROMPT_ANALYSIS
-                else "Disabled"
-            ),
+        "results": results,
+        "recommendation": {
+            "best_open_source": "llava:13b or llama3.2-vision",
+            "fastest_baseline": "llava:latest (same as llava:7b)",
+            "medical_specialist": "llava_med (llava:13b + medical prompt)",
+            "pathology_classifier": "biomedclip (BiomedCLIP via open_clip)",
+            "best_accuracy": "gpt4v or claude (requires API credits)",
         },
     }
 
 
-@router.post("/test_models")
-async def test_all_vision_models(file: UploadFile = File(...)):
-    """
-    Test image with all available vision models for comparison.
-
-    Warning: Makes API calls to GPT-4 and Claude if configured.
-    """
-    logger.info(f"\n{'='*60}")
-    logger.info(f"TESTING ALL VISION MODELS")
-    logger.info(f"{'='*60}")
-
-    results = {}
-    content = await file.read()
-    image = ImageProcessor.preprocess_image(content)
-
-    models_to_test = ["florence", "llava", "gpt4v", "claude"]
-
-    for model_name in models_to_test:
-        logger.info(f"Testing {model_name}...")
-        logger.info("......................................................................")
-
-        try:
-            # Temporarily switch to this model
-            original_provider = vision_settings.VISION_MODEL_PROVIDER
-            vision_settings.VISION_MODEL_PROVIDER = model_name
-
-            # Force reload of client
-            vision_client._clients = {}
-            
-            start = time.time()
-            result = vision_client.analyze_dental_radiograph(image)
-            elapsed = (time.time() - start) * 1000
-
-            results[model_name] = {
-                "success": True,
-                "detailed_description": (
-                    result["detailed_description"][:200] + "..."
-                    if len(result["detailed_description"]) > 200
-                    else result["detailed_description"]
-                ),
-                "pathology_summary": (
-                    result.get("pathology_summary", "")[:100] + "..."
-                    if result.get("pathology_summary")
-                    and len(result.get("pathology_summary", "")) > 100
-                    else result.get("pathology_summary", "")
-                ),
-                "time_ms": round(elapsed, 2),
-                "model_used": result.get("model", model_name),
-            }
-
-            logger.info(f"✅ {model_name}: Time elapsed: {elapsed:.2f}ms")
-            
-
-            # Restore original
-            vision_settings.VISION_MODEL_PROVIDER = original_provider
-            vision_client._clients = {}
-
-        except Exception as e:
-            logger.info("......................................................................")
-            logger.error(f"❌ {model_name}: {str(e)}")
-            results[model_name] = {"success": False, "error": str(e)}
-            logger.info("......................................................................")
-
-    logger.info(f"{'='*60}\n")
-
+@router.get("/config")
+async def get_vision_config():
+    """Return current vision model configuration."""
     return {
-        "test_results": results,
-        # "recommendation": "gpt4v or claude for production (highest accuracy), llava:13b for development (good balance)",
-        # "note": "Florence-2 not recommended for medical imaging"
+        "provider": vision_settings.VISION_MODEL_PROVIDER,
+        "llava_model": vision_settings.LLAVA_MODEL,
+        "max_tokens": vision_settings.VISION_MAX_TOKENS,
+        "temperature": vision_settings.VISION_TEMPERATURE,
+        "enhance_contrast": vision_settings.ENHANCE_CONTRAST,
     }

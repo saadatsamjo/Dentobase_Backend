@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # scripts/ingest_documents.py
 #  to run the script, run the following command:
 #  python scripts/ingest_documents.py

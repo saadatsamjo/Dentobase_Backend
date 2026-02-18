@@ -1,40 +1,115 @@
 # app/visionsystem/vision_client.py
-"""
-Unified Vision Client - Fixed pathology summary extraction
-"""
-import logging
-import re
-from typing import Dict
-from PIL import Image
 
+import logging
+import json
+from typing import Dict, Optional
+from PIL import Image
 from config.visionconfig import vision_settings
 
 logger = logging.getLogger(__name__)
 
 
+def _build_json_schema(tooth_number: str = None) -> str:
+    """Build JSON schema with actual tooth number baked in — no more placeholder copying."""
+    focus = tooth_number if tooth_number else "the most symptomatic tooth"
+    # Derive FDI quadrant hint from tooth number
+    if tooth_number and tooth_number.isdigit():
+        t = int(tooth_number)
+        if 41 <= t <= 48:
+            quadrant_hint = "41-48 range (lower right)"
+        elif 31 <= t <= 38:
+            quadrant_hint = "31-38 range (lower left)"
+        elif 11 <= t <= 18:
+            quadrant_hint = "11-18 range (upper right)"
+        elif 21 <= t <= 28:
+            quadrant_hint = "21-28 range (upper left)"
+        else:
+            quadrant_hint = "FDI range near " + tooth_number
+    else:
+        quadrant_hint = "FDI two-digit numbers only (e.g. 46, 47, 48)"
+
+    return f"""RESPOND WITH ONLY THIS JSON:
+            {{
+            "teeth_visible": ["USE FDI NUMBERING ONLY - teeth in {quadrant_hint} - list only 3-5 actually visible"],
+            "image_quality": "good/fair/poor",
+            "focused_tooth": "{focus}",
+            "caries": {{
+                "present": true_or_false,
+                "location": "tooth and surface, or null",
+                "severity": "mild/moderate/severe or null",
+                "notes": "describe dark crown areas, or null"
+            }},
+            "periapical_pathology": {{
+                "present": true_or_false,
+                "location": "tooth number, or null",
+                "size_mm": null,
+                "characteristics": "shape/border of radiolucency, or null",
+                "notes": "periapical observations, or null"
+            }},
+            "bone_loss": {{
+                "present": true_or_false,
+                "type": "horizontal/vertical/null",
+                "location": "between which teeth, or null",
+                "severity": "mild/moderate/severe or null",
+                "notes": "bone level description, or null"
+            }},
+            "root_canal_treatment": {{
+                "present": true_or_false,
+                "location": "tooth number, or null",
+                "quality": "adequate/inadequate/null",
+                "notes": "RCT appearance, or null"
+            }},
+            "restorations": {{
+                "present": true_or_false,
+                "type": "amalgam/composite/crown/null",
+                "location": "tooth and surface, or null",
+                "condition": "satisfactory/defective/null",
+                "notes": "restoration description, or null"
+            }},
+            "other_abnormalities": [],
+            "primary_finding": "Describe main finding on tooth {focus} based on what you see",
+            "severity": "normal/mild/moderate/severe",
+            "urgency": "routine/prompt/urgent/emergency",
+            "image_quality_score": 0.8,
+            "diagnostic_confidence": 0.7,
+            "interpretation_notes": null,
+            "narrative_summary": "2-3 sentence clinical summary of findings on tooth {focus}"
+            }}
+
+            RULES — MUST FOLLOW:
+            - teeth_visible: FDI two-digit numbers ONLY (e.g. 46, 47, 48) — NEVER use 1-32 Universal numbering
+            - Maximum 5 teeth in teeth_visible — periapical X-rays show 3-5 teeth
+            - Tooth {focus} MUST be included in teeth_visible
+            - If dark areas in crown → caries present=true
+            - If dark halo at root tip → periapical_pathology present=true
+            - primary_finding: write what YOU SEE, not a template phrase
+            """
+
+
 class VisionClient:
-    """
-    Unified interface to all vision models.
-    Automatically routes to the correct model based on vision_settings.VISION_MODEL_PROVIDER
-    """
-    
+    """Unified interface to ALL vision models."""
+
     _instance = None
     _clients = {}
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
+
     def _get_client(self):
-        """Get the appropriate vision client based on configuration."""
         provider = vision_settings.VISION_MODEL_PROVIDER
-        
-        # Lazy load clients only when needed
         if provider not in self._clients:
+            logger.info(f"🔄 Loading {provider} vision client...")
             if provider == "llava":
                 from app.visionsystem.llava_client import llava_client
                 self._clients["llava"] = llava_client
+            elif provider == "llava_med":
+                from app.visionsystem.llava_med_client import llava_med_client
+                self._clients["llava_med"] = llava_med_client
+            elif provider == "biomedclip":
+                from app.visionsystem.biomedclip_client import biomedclip_client
+                self._clients["biomedclip"] = biomedclip_client
             elif provider == "gpt4v":
                 from app.visionsystem.gpt4_client import gpt4v_client
                 self._clients["gpt4v"] = gpt4v_client
@@ -46,221 +121,201 @@ class VisionClient:
                 self._clients["florence"] = florence_client
             else:
                 raise ValueError(f"Unknown vision provider: {provider}")
-        
+            logger.info(f"✅ {provider} client loaded")
         return self._clients[provider]
-    
-    def _extract_pathology_summary(self, detailed_description: str) -> str:
-        """
-        Extract the PATHOLOGY SUMMARY section from the detailed description.
-        
-        Args:
-            detailed_description: Full analysis text
-            
-        Returns:
-            Extracted pathology summary or original if not found
-        """
-        # Try to find the PATHOLOGY SUMMARY section
-        patterns = [
-            r'PATHOLOGY SUMMARY:?\s*\n(.*?)(?:\n\n|$)',  # Section with blank line after
-            r'PATHOLOGY SUMMARY:?\s*\n(.*)',              # Section to end of text
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, detailed_description, re.DOTALL | re.IGNORECASE)
-            if match:
-                summary = match.group(1).strip()
-                if summary and len(summary) > 10:  # Ensure we got meaningful content
-                    logger.info(f"✅ Extracted pathology summary: {len(summary)} chars")
-                    return summary
-        
-        # If no PATHOLOGY SUMMARY section found, try to extract structured findings
-        logger.warning("⚠️  No PATHOLOGY SUMMARY section found, using full description")
-        return detailed_description
-    
+
     def analyze_dental_radiograph(
-        self, 
+        self,
         image: Image.Image,
         context: str = None,
-        clinical_notes: str = None
-    ) -> Dict[str, str]:
-        """
-        Analyze a dental periapical radiograph for pathologies and anomalies.
-        
-        This is the PRIMARY method for CDSS integration.
-        Uses specialized dental X-ray analysis prompts with optional clinical context.
-        
-        Args:
-            image: PIL Image of dental radiograph
-            context: Optional clinical context (e.g., chief complaint, tooth numbers)
-            clinical_notes: Optional relevant clinical notes
-            
-        Returns:
-            dict with:
-                - detailed_description: Full clinical analysis
-                - pathology_summary: Extracted structured pathology findings
-                - model: Which model was used
-        """
+        clinical_notes: str = None,
+        tooth_number: str = None
+    ) -> Dict:
         client = self._get_client()
         provider = vision_settings.VISION_MODEL_PROVIDER
-        
-        logger.info(f"Analyzing dental radiograph with {provider}...")
+        logger.info(f"🔍 Analyzing dental radiograph with {provider}...: Vision Model: {vision_settings.current_vision_model}")
         if context:
-            logger.info(f"📋 Clinical context provided: {context[:100]}...")
-        if clinical_notes:
-            logger.info(f"📝 Clinical notes provided: {len(clinical_notes)} chars")
-        
-        # Build enhanced prompt if context is provided
-        if context or clinical_notes:
-            enhanced_prompt = self._build_contextual_prompt(context, clinical_notes)
-            logger.info(f"✅ Using context-enhanced analysis")
-            
-            # LOG THE ACTUAL PROMPT BEING SENT
-            logger.info(f"\n{'─'*70}")
-            logger.info(f"📤 PROMPT SENT TO VISION MODEL:")
-            logger.info(f"{'─'*70}")
-            logger.info(f"{enhanced_prompt[:500]}...")  # Show first 500 chars
-            logger.info(f"{'─'*70}\n")
-            
-            # Use enhanced prompt with the client's analyze_image method
-            result = client.analyze_image(image, enhanced_prompt)
-            
-            # For compatibility, wrap string response in expected dict format
-            if isinstance(result, str):
-                # Extract pathology summary from the detailed description
-                pathology_summary = self._extract_pathology_summary(result)
-                
-                return {
-                    "detailed_description": result,
-                    "pathology_summary": pathology_summary,
-                    "model": provider
-                }
-            else:
-                return result
+            logger.info(f"   📋 Context: {context[:80]}...")
+        if tooth_number:
+            logger.info(f"   🦷 FOCUS TOOTH: #{tooth_number}")
+        if provider == "florence":
+            return self._analyze_with_florence(client, image, context, tooth_number)
+        elif provider == "biomedclip":
+            return self._analyze_with_biomedclip(client, image, tooth_number)
         else:
-            # Use the standard clinical image analysis method
-            result = client.analyze_clinical_image(image)
-        
-        # Ensure consistent output format
-        pathology_summary = result.get("region_findings", "")
-        if not pathology_summary or pathology_summary == "No specific pathology detected":
-            # Try to extract from detailed_description
-            pathology_summary = self._extract_pathology_summary(
-                result.get("detailed_description", "")
-            )
-        
-        return {
-            "detailed_description": result.get("detailed_description", ""),
-            "pathology_summary": pathology_summary,
-            "model": result.get("model", provider)
-        }
-    
-    def _build_contextual_prompt(self, context: str = None, clinical_notes: str = None) -> str:
-        """
-        Build an enhanced prompt that incorporates clinical context.
-        
-        Args:
-            context: Clinical context (complaint, tooth numbers, etc.)
-            clinical_notes: Relevant clinical notes
-            
-        Returns:
-            Enhanced prompt string
-        """
-        base_prompt = """You are a dental radiologist analyzing a periapical X-ray image. 
-                Provide a detailed clinical analysis of this dental radiograph, focusing on:
+            return self._analyze_with_structured_output(client, provider, image, context, clinical_notes, tooth_number)
 
-                1. ANATOMICAL STRUCTURES VISIBLE
-                - Identify all teeth and structures in the image
-                - Note the quality of the radiograph
+    def _analyze_with_florence(self, client, image, context=None, tooth_number=None):
+        logger.info("⚠️  Florence-2: Using simple task token (no context support)")
+        try:
+            response = client.analyze_image(image, "<MORE_DETAILED_CAPTION>")
+            logger.info(f"Analysis complete: {len(response)} chars")
+            return {"structured_findings": None, "narrative_analysis": response, "model": "florence",
+                    "detailed_description": response, "pathology_summary": "Florence-2 general description",
+                    "confidence_score": 0.5, "image_quality_score": 0.5}
+        except Exception as e:
+            return self._error_response("florence", str(e))
 
-                2. PATHOLOGY DETECTION - Systematically check for:
-                a) DENTAL CARIES: Any radiolucent areas in tooth crowns indicating decay
-                b) PERIAPICAL PATHOLOGY: Radiolucent areas at root apices (abscesses, granulomas, cysts)
-                c) BONE LOSS: Horizontal or vertical bone loss around teeth
-                d) PULPAL PATHOLOGY: Pulp stones, calcifications, or pulp chamber obliteration
-                e) ROOT PATHOLOGY: Root resorption, fractures, or abnormal root morphology
-                f) EXISTING DENTAL WORK: Fillings, crowns, root canal fillings - assess their integrity
+    def _analyze_with_biomedclip(self, client, image, tooth_number=None):
+        logger.info("🔬 BiomedCLIP: Running pathology classification...")
+        try:
+            result = client.classify_pathology(image)
+            if "error" in result:
+                return self._error_response("biomedclip", result["error"])
+            summary = f"BiomedCLIP: {result['prediction']} ({result['confidence']:.1%})"
+            return {"structured_findings": None, "narrative_analysis": summary, "model": "biomedclip",
+                    "detailed_description": client.analyze_image(image), "pathology_summary": summary,
+                    "confidence_score": result["confidence"], "image_quality_score": 0.5}
+        except Exception as e:
+            return self._error_response("biomedclip", str(e))
 
-                3. CLINICAL ASSESSMENT
-                - Severity level (mild/moderate/severe)
-                - Urgency level (routine/prompt/urgent/emergency)
-                - Primary diagnosis based on radiographic findings
+    def _analyze_with_structured_output(self, client, provider, image, context=None, clinical_notes=None, tooth_number=None):
+        prompt = self._build_structured_prompt(context, clinical_notes, tooth_number)
+        logger.info(f"📤 Sending structured prompt to {provider}")
+        logger.info(f"   Prompt length: {len(prompt)} chars")
+        try:
+            response = client.analyze_image(image, prompt)
+            logger.info(f"LLaVA analysis complete: {len(response)} characters")
+            return self._parse_structured_response(response, provider, tooth_number)
+        except Exception as e:
+            logger.error(f"❌ {provider} analysis failed: {e}")
+            raise
 
-                After your detailed analysis, provide a PATHOLOGY SUMMARY in this exact format:
+    def _build_structured_prompt(self, context=None, clinical_notes=None, tooth_number=None):
+        prompt = """You are an expert dental radiologist analyzing a periapical X-ray.
 
-                PATHOLOGY SUMMARY:
+                MANDATORY:
+                1. Respond with ONLY valid JSON - no preamble, no markdown, no explanation
+                2. Periapical X-rays show 3-5 adjacent teeth — list all using FDI numbering
+                3. PATHOLOGY IS EXPECTED — look carefully and report what you actually see
 
-                1. CARIES (Cavities):
-                - Yes/No:
-                    - [Location and details if yes]
+                READING GUIDE:
+                - DARK areas (radiolucent) = PATHOLOGY: caries, abscess, bone loss
+                - BRIGHT areas (radiopaque) = enamel, fillings, healthy bone
+                - Caries: dark spots/shadows in tooth crown
+                - Periapical abscess: dark halo around root tip
+                - Bone loss: reduced bone height between teeth
 
-                2. PERIAPICAL LESION/ABSCESS:
-                - Yes/No:
-                    - [Details if yes]
-
-                3. BONE LOSS:
-                - Yes/No:
-                    - [Type and location if yes]
-
-                4. ROOT CANAL TREATMENT:
-                - Yes/No:
-                    - [Assessment if yes]
-
-                5. RESTORATIONS (Fillings/Crowns):
-                - Yes/No:
-                    - [Type and condition if yes]
-
-                6. OTHER ABNORMALITIES:
-                - [List any other findings]
                 """
-        
-        # Add clinical context if provided
-        if context or clinical_notes:
-            context_section = "\n\nCLINICAL CONTEXT:\n"
-            
+        if tooth_number or context:
+            prompt += "CLINICAL CONTEXT:\n"
+            if tooth_number:
+                prompt += f"⚠️  FOCUS TOOTH: #{tooth_number} — patient has pain here. Pathology is LIKELY PRESENT.\n"
+                prompt += f"   Examine tooth #{tooth_number} with extreme care.\n"
             if context:
-                context_section += f"Chief Complaint/Context: {context}\n"
-            
-            if clinical_notes:
-                context_section += f"Clinical Notes: {clinical_notes}\n"
-            
-            context_section += "\nIMPORTANT: Incorporate this clinical information into your radiographic analysis. "
-            context_section += "Pay special attention to areas mentioned in the clinical context. "
-            context_section += "However, base your radiographic findings ONLY on what you can actually see in the X-ray.\n"
-            
-            base_prompt = context_section + base_prompt
-        
-        return base_prompt
-    
-    def analyze_image(self, image: Image.Image, custom_prompt: str = None) -> str:
-        """
-        Generic image analysis with optional custom prompt.
-        
-        For CDSS, prefer analyze_dental_radiograph() instead.
-        
-        Args:
-            image: PIL Image
-            custom_prompt: Optional custom analysis prompt
-            
-        Returns:
-            str: Analysis description
-        """
-        client = self._get_client()
-        
-        if custom_prompt:
-            return client.analyze_image(image, custom_prompt)
+                prompt += f"Chief Complaint: {context}\n"
+            if clinical_notes and vision_settings.INCLUDE_CLINICAL_NOTES_IN_VISION_MODEL_PROMPT:
+                prompt += f"Notes: {clinical_notes[:200]}\n"
+            prompt += "\n"
+
+        # KEY FIX: inject actual tooth number so model never sees "TOOTH_NUMBER_HERE"
+        prompt += _build_json_schema(tooth_number)
+        prompt += "\nANALYZE THE X-RAY AND RESPOND WITH JSON ONLY:"
+        return prompt
+
+    def _parse_structured_response(self, response: str, provider: str, tooth_number: str = None) -> Dict:
+        logger.info(f"📥 Parsing response from {provider} ({len(response)} chars)")
+        try:
+            cleaned = response.strip()
+            for prefix in ["```json", "```"]:
+                if cleaned.startswith(prefix):
+                    cleaned = cleaned[len(prefix):]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
+
+            structured_data = json.loads(cleaned)
+
+            # KEY FIX: Override focused_tooth with actual value BEFORE formatting
+            # This ensures the placeholder never leaks into narrative/summary strings
+            if tooth_number:
+                structured_data["focused_tooth"] = tooth_number
+
+            # Format narrative/summary using corrected data
+            detailed = self._format_narrative(structured_data)
+            summary = self._format_summary(structured_data)
+
+            logger.info("✅ Successfully parsed JSON")
+            logger.info(f"   Focused tooth: {structured_data.get('focused_tooth', 'N/A')}")
+            logger.info(f"   Finding: {str(structured_data.get('primary_finding', 'N/A'))[:70]}...")
+
+            return {
+                "structured_findings": structured_data,
+                "narrative_analysis": structured_data.get("narrative_summary", ""),
+                "model": provider,
+                "detailed_description": detailed,
+                "pathology_summary": summary,
+                "confidence_score": structured_data.get("diagnostic_confidence", 0.5),
+                "image_quality_score": structured_data.get("image_quality_score", 0.5),
+            }
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON parse failed: {e}")
+            return {"structured_findings": None, "narrative_analysis": response, "model": provider,
+                    "detailed_description": response, "pathology_summary": "Unable to parse structured output",
+                    "confidence_score": 0.3, "image_quality_score": 0.5}
+
+    def _format_narrative(self, data: Dict) -> str:
+        parts = ["RADIOGRAPHIC ANALYSIS",
+                 f"Teeth visible: {', '.join(data.get('teeth_visible', []))}",
+                 f"Image quality: {data.get('image_quality', 'unknown')}"]
+        if data.get("focused_tooth"):
+            parts.append(f"PRIMARY FOCUS: Tooth #{data['focused_tooth']}\n")
+        findings = []
+        if data.get("caries", {}).get("present"):
+            c = data["caries"]
+            findings.append(f"CARIES: {c.get('location')}, {c.get('severity')}")
+        if data.get("periapical_pathology", {}).get("present"):
+            p = data["periapical_pathology"]
+            findings.append(f"PERIAPICAL: Tooth {p.get('location')}")
+        if data.get("bone_loss", {}).get("present"):
+            b = data["bone_loss"]
+            findings.append(f"BONE LOSS: {b.get('severity')} {b.get('type')}")
+        if data.get("root_canal_treatment", {}).get("present"):
+            findings.append(f"RCT: {data['root_canal_treatment'].get('location')}")
+        if data.get("restorations", {}).get("present"):
+            r = data["restorations"]
+            findings.append(f"RESTORATION: {r.get('type')} at {r.get('location')}")
+        for a in data.get("other_abnormalities", []):
+            findings.append(f"OTHER: {a}")
+        if findings:
+            parts.append("\nPATHOLOGY DETECTED:")
+            parts.extend([f"  ✓ {f}" for f in findings])
         else:
-            # Use default clinical analysis
-            result = client.analyze_clinical_image(image)
-            return result.get("detailed_description", "")
-    
-    def get_model_info(self) -> Dict:
-        """Get information about the currently configured vision model."""
-        return {
-            "provider": vision_settings.VISION_MODEL_PROVIDER,
-            "model": self._get_client()._get_model_name() if hasattr(self._get_client(), '_get_model_name') else vision_settings.VISION_MODEL_PROVIDER,
-            "dual_prompt": vision_settings.DUAL_PROMPT_ANALYSIS,
-            "context_aware": True
-        }
+            parts.append("\nNo significant pathology detected")
+        parts.append(f"\nPrimary Finding: {data.get('primary_finding', 'None')}")
+        parts.append(f"Severity: {data.get('severity', 'unknown')}")
+        parts.append(f"Urgency: {data.get('urgency', 'unknown')}")
+        if data.get("narrative_summary"):
+            parts.append(f"\nSummary: {data['narrative_summary']}")
+        return "\n".join(parts)
+
+    def _format_summary(self, data: Dict) -> str:
+        parts = []
+        if data.get("focused_tooth"):
+            parts.append(f"**Focused on tooth #{data['focused_tooth']}**\n")
+        caries = data.get("caries", {})
+        periapical = data.get("periapical_pathology", {})
+        bone = data.get("bone_loss", {})
+        rct = data.get("root_canal_treatment", {})
+        resto = data.get("restorations", {})
+        parts.extend([
+            f"CARIES: {'✓ YES - ' + str(caries.get('location', '')) if caries.get('present') else 'No'}",
+            f"PERIAPICAL: {'✓ YES - ' + str(periapical.get('location', '')) if periapical.get('present') else 'No'}",
+            f"BONE LOSS: {'✓ YES - ' + str(bone.get('severity', '')) if bone.get('present') else 'No'}",
+            f"RCT: {'✓ YES' if rct.get('present') else 'No'}",
+            f"RESTORATIONS: {'✓ YES - ' + str(resto.get('type', '')) if resto.get('present') else 'No'}",
+            f"\nPrimary Finding: {data.get('primary_finding', 'None')}",
+            f"Severity: {data.get('severity', 'unknown')}",
+            f"Urgency: {data.get('urgency', 'unknown')}",
+        ])
+        return "\n".join(parts)
+
+    def _error_response(self, model: str, error: str) -> Dict:
+        return {"structured_findings": None, "narrative_analysis": f"Analysis failed: {error}",
+                "model": model, "detailed_description": f"Error: {error}",
+                "pathology_summary": "Analysis failed", "confidence_score": 0.0,
+                "image_quality_score": 0.0, "error": error}
+
 
 # Global instance
 vision_client = VisionClient()
