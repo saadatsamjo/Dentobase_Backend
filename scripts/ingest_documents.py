@@ -31,13 +31,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def ingest_pdf():
+def ingest_pdf(pdf_path: str = None):
     """
     Load PDF, split into chunks, and store in ChromaDB.
     """
     start_time = time.time()
     # Check if PDF exists
-    pdf_path = Path(rag_settings.PDF_PATH)
+    if pdf_path is None:
+        pdf_path = rag_settings.resolved_pdf_path
+    else:
+        pdf_path = Path(pdf_path)
+    
     if not pdf_path.exists():
         print("=======================================================================\n")
         logger.error(f"❌ PDF not found at: {pdf_path}")
@@ -94,20 +98,21 @@ def ingest_pdf():
     embeddings = embedding_provider.get_embeddings()
 
     # Create/update ChromaDB
+    persist_dir = rag_settings.resolved_persist_dir
     logger.info(f"💾 Creating vector store...")
-    logger.info(f"   Directory: {rag_settings.PERSIST_DIR}")
+    logger.info(f"   Directory: {persist_dir}")
     print("=======================================================================\n")
 
     # Remove old ChromaDB if it exists
-    if Path(rag_settings.PERSIST_DIR).exists():
+    if persist_dir.exists():
         print("=======================================================================\n")
-        logger.info(f"   Deleting old ChromaDB at: {rag_settings.PERSIST_DIR}")
-        shutil.rmtree(rag_settings.PERSIST_DIR)
+        logger.info(f"   Deleting old ChromaDB at: {persist_dir}")
+        shutil.rmtree(persist_dir)
         logger.info(f"   Old ChromaDB deleted.")
 
     try:
         vectorstore = Chroma.from_documents(
-            documents=chunks, embedding=embeddings, persist_directory=rag_settings.PERSIST_DIR
+            documents=chunks, embedding=embeddings, persist_directory=str(persist_dir)
         )
         logger.info(f"✅Vector store created successfully")
 
@@ -134,7 +139,7 @@ def ingest_pdf():
         print("=======================================================================\n")
         logger.info(f"\n✅ INGESTION COMPLETE!")
         logger.info(f"   Total chunks: {count}")
-        logger.info(f"   Persist directory: {rag_settings.PERSIST_DIR}")
+        logger.info(f"   Persist directory: {persist_dir}")
         logger.info(f"   Ready for retrieval!")
 
         end_time = time.time()

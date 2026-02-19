@@ -11,11 +11,12 @@ import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.visionsystem.image_processor import ImageProcessor
 from app.visionsystem.vision_client import vision_client
 from app.visionsystem.vision_schemas import VisionAnalysisResponse
+from config.config_schemas import VisionConfigRequest, VisionConfigResponse
 from config.visionconfig import vision_settings
 
 router = APIRouter()
@@ -92,14 +93,14 @@ async def test_all_vision_models(
     # (provider_type, ollama_model_override_or_None, label)
     # NOTE: llava:7b is NOT installed - it's llava:latest (4.7 GB, same model)
     models_to_test = [
-        ("llava",     "llava:13b",          "llava:13b - Recommended open-source"),
-        ("llava",     "llama3.2-vision",    "llama3.2-vision - Latest from Meta"),
-        ("llava",     "llava:latest",       "llava:latest - Baseline (7B)"),
-        ("llava_med", None,                 "LLaVA-Med - Medical specialist (via llava:13b)"),
-        ("biomedclip", None,                "BiomedCLIP - Pathology classifier (open_clip)"),
-        ("florence",  None,                 "Florence-2 - Not recommended"),
-        ("gpt4v",     None,                 "GPT-4 Vision - Best accuracy"),
-        ("claude",    None,                 "Claude 3.5 Sonnet - Medical reasoning"),
+        ("llava", "llava:13b", "llava:13b - Recommended open-source"),
+        ("llava", "llama3.2-vision", "llama3.2-vision - Latest from Meta"),
+        ("llava", "llava:latest", "llava:latest - Baseline (7B)"),
+        ("llava_med", None, "LLaVA-Med - Medical specialist (via llava:13b)"),
+        ("biomedclip", None, "BiomedCLIP - Pathology classifier (open_clip)"),
+        ("florence", None, "Florence-2 - Not recommended"),
+        ("gpt4v", None, "GPT-4 Vision - Best accuracy"),
+        ("claude", None, "Claude 3.5 Sonnet - Medical reasoning"),
     ]
 
     results = {}
@@ -208,13 +209,107 @@ async def test_all_vision_models(
     }
 
 
-@router.get("/config")
+@router.get("/config", response_model=VisionConfigResponse)
 async def get_vision_config():
-    """Return current vision model configuration."""
-    return {
-        "provider": vision_settings.VISION_MODEL_PROVIDER,
-        "llava_model": vision_settings.LLAVA_MODEL,
-        "max_tokens": vision_settings.VISION_MAX_TOKENS,
-        "temperature": vision_settings.VISION_TEMPERATURE,
-        "enhance_contrast": vision_settings.ENHANCE_CONTRAST,
+    """
+    Get current vision system configuration.
+
+    Returns all vision settings including:
+    - Active vision model provider and model name
+    - Inference parameters (temperature, max_tokens)
+    - Prompt engineering settings
+    - Image preprocessing options
+    """
+    return VisionConfigResponse(
+        # Model Selection
+        vision_model_provider=vision_settings.VISION_MODEL_PROVIDER,
+        current_vision_model=vision_settings.current_vision_model,
+        llava_model=vision_settings.LLAVA_MODEL if vision_settings.VISION_MODEL_PROVIDER == "llava" else None,
+        # Inference Settings
+        vision_temperature=vision_settings.VISION_TEMPERATURE,
+        vision_max_tokens=vision_settings.VISION_MAX_TOKENS,
+        # Prompt Engineering
+        include_clinical_notes_in_vision_model_prompt=vision_settings.INCLUDE_CLINICAL_NOTES_IN_VISION_MODEL_PROMPT,
+        # Image Processing
+        enhance_contrast=vision_settings.ENHANCE_CONTRAST,
+        contrast_factor=vision_settings.CONTRAST_FACTOR,
+        brightness_factor=vision_settings.BRIGHTNESS_FACTOR,
+    )
+
+
+@router.post("/config", response_model=VisionConfigResponse)
+async def update_vision_config(config: VisionConfigRequest):
+    """
+    Update vision configuration (in-memory only, resets on restart).
+
+    Supports partial updates — send only the fields you want to change.
+
+    Important cache invalidations:
+    - Changing vision_model_provider → clears vision client cache
+    - Changing llava_model → clears cache and forces model reload
+
+    Example request:
+    ```json
+    {
+        "vision_model_provider": "llava",
+        "llava_model": "llama3.2-vision",
+        "vision_temperature": 0.0
     }
+    ```
+    """
+    updated_fields = []
+
+    # ── Model Selection ──
+    if config.vision_model_provider is not None:
+        vision_settings.VISION_MODEL_PROVIDER = config.vision_model_provider
+        # Clear vision client cache when provider changes
+        vision_client._clients = {}
+        updated_fields.append(
+            f"vision_model_provider → {config.vision_model_provider} (cache cleared)"
+        )
+
+    if config.llava_model is not None:
+        vision_settings.LLAVA_MODEL = config.llava_model
+        # Force reload of LLaVA client
+        if "llava" in vision_client._clients:
+            del vision_client._clients["llava"]
+        updated_fields.append(f"llava_model → {config.llava_model} (cache cleared)")
+
+    # ── Inference Settings ──
+    if config.vision_temperature is not None:
+        vision_settings.VISION_TEMPERATURE = config.vision_temperature
+        updated_fields.append(f"vision_temperature → {config.vision_temperature}")
+
+    if config.vision_max_tokens is not None:
+        vision_settings.VISION_MAX_TOKENS = config.vision_max_tokens
+        updated_fields.append(f"vision_max_tokens → {config.vision_max_tokens}")
+
+    # ── Prompt Engineering ──
+    if config.include_clinical_notes_in_vision_model_prompt is not None:
+        vision_settings.INCLUDE_CLINICAL_NOTES_IN_VISION_MODEL_PROMPT = (
+            config.include_clinical_notes_in_vision_model_prompt
+        )
+        updated_fields.append(
+            f"include_clinical_notes → {config.include_clinical_notes_in_vision_model_prompt}"
+        )
+
+    # ── Image Processing ──
+    if config.enhance_contrast is not None:
+        vision_settings.ENHANCE_CONTRAST = config.enhance_contrast
+        updated_fields.append(f"enhance_contrast → {config.enhance_contrast}")
+
+    if config.contrast_factor is not None:
+        vision_settings.CONTRAST_FACTOR = config.contrast_factor
+        updated_fields.append(f"contrast_factor → {config.contrast_factor}")
+
+    if config.brightness_factor is not None:
+        vision_settings.BRIGHTNESS_FACTOR = config.brightness_factor
+        updated_fields.append(f"brightness_factor → {config.brightness_factor}")
+
+    # Log changes
+    logger.info(f"📝 Vision Config Updated: {len(updated_fields)} field(s)")
+    for field in updated_fields:
+        logger.info(f"   • {field}")
+
+    # Return updated config
+    return await get_vision_config()

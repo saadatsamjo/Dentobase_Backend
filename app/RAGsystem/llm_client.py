@@ -116,46 +116,46 @@ class LLMClient:
         
         prompt = f"""You are a clinical decision support system for dentistry.
 
-=== PATIENT INFORMATION ===
-{patient_context}
+                === PATIENT INFORMATION ===
+                {patient_context}
 
-=== RADIOGRAPHIC FINDINGS ===
-{image_findings}
+                === RADIOGRAPHIC FINDINGS ===
+                {image_findings}
 
-=== CLINICAL GUIDELINES ===
-{retrieved_knowledge}
+                === CLINICAL GUIDELINES ===
+                {retrieved_knowledge}
 
-=== AVAILABLE PAGES ===
-You may ONLY reference these page numbers: {pages_str}
-DO NOT invent or make up any page numbers not in this list.
+                === AVAILABLE PAGES ===
+                You may ONLY reference these page numbers: {pages_str}
+                DO NOT invent or make up any page numbers not in this list.
 
-=== CLINICAL QUERY ===
-{query}
+                === CLINICAL QUERY ===
+                {query}
 
-=== CRITICAL INSTRUCTIONS ===
-1. EXTRACT the tooth number from the patient context or clinical notes
-2. Your diagnosis MUST explicitly mention that specific tooth number
-3. Use ONLY page numbers from the available list above
-4. Format your response EXACTLY as shown below (do not add extra sections)
+                === CRITICAL INSTRUCTIONS ===
+                1. EXTRACT the tooth number from the patient context or clinical notes
+                2. Your diagnosis MUST explicitly mention that specific tooth number
+                3. Use ONLY page numbers from the available list above
+                4. Format your response EXACTLY as shown below (do not add extra sections)
 
-=== RESPONSE FORMAT ===
-Use this EXACT structure (include the section headers):
+                === RESPONSE FORMAT ===
+                Use this EXACT structure (include the section headers):
 
-DIAGNOSIS: [Write complete diagnosis here, MUST include tooth number]
+                DIAGNOSIS: [Write complete diagnosis here, MUST include tooth number]
 
-DIFFERENTIAL:
-- [Alternative diagnosis 1]
-- [Alternative diagnosis 2]
+                DIFFERENTIAL:
+                - [Alternative diagnosis 1]
+                - [Alternative diagnosis 2]
 
-MANAGEMENT:
-1. [First treatment step]
-2. [Second treatment step]  
-3. [Third treatment step]
-4. [Fourth treatment step if needed]
+                MANAGEMENT:
+                1. [First treatment step]
+                2. [Second treatment step]  
+                3. [Third treatment step]
+                4. [Fourth treatment step if needed]
 
-PAGES: [comma-separated page numbers only, e.g., 385, 388, 401]
+                PAGES: [comma-separated page numbers only, e.g., 385, 388, 401]
 
-Now provide your clinical recommendation:"""
+                Now provide your clinical recommendation:"""
         
         return prompt
     

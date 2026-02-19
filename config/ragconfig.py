@@ -6,6 +6,11 @@ Controls knowledge retrieval and LLM settings for clinical recommendations
 from pydantic_settings import BaseSettings
 from typing import Literal, Optional
 import torch
+import os
+from pathlib import Path
+
+# Calculate the project root (assuming this file is in project_root/config/)
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 class RAGSettings(BaseSettings):
     """Configuration for Clinical Decision Support RAG System"""
@@ -45,8 +50,8 @@ class RAGSettings(BaseSettings):
     
     # HuggingFace Embedding Model (if EMBEDDING_PROVIDER = "huggingface")
     # HF_EMBEDDING_MODEL: str = "BAAI/bge-large-en-v1.5"
-    HF_EMBEDDING_MODEL: str = "abhinand/MedEmbed-large-v0.1"
-    # HF_EMBEDDING_MODEL: str = "neuml/pubmedbert-base-embeddings"
+    # HF_EMBEDDING_MODEL: str = "abhinand/MedEmbed-large-v0.1"
+    HF_EMBEDDING_MODEL: str = "neuml/pubmedbert-base-embeddings"
     
     
     # ============================================================================
@@ -91,19 +96,20 @@ class RAGSettings(BaseSettings):
     # DOCUMENT PROCESSING
     # ============================================================================
     # Text chunk size for document splitting
-    CHUNK_SIZE: int = 2500  # Optimized for clinical context
+    CHUNK_SIZE: int = 1500  # Optimized for clinical context
     
     # Overlap between chunks (maintains context continuity)
     CHUNK_OVERLAP: int = 100
     
-    # Path to clinical guidelines PDF
-    PDF_PATH: str = "./documents/stg_document2.pdf"
+    # Path to clinical guidelines PDF (Relative to BASE_DIR or absolute)
+    # If a relative path is provided in .env, it will be joined with BASE_DIR
+    PDF_PATH: str = str(BASE_DIR / "documents" / "stg.pdf") # OR THE ONE DEFINED IN THE ENVIRONMENT VARIABLES, IF NONE IN THE .ENV, THIS WILL BE USED
     
     # ============================================================================
     # VECTOR STORE
     # ============================================================================
     # Directory for persisted vector embeddings
-    PERSIST_DIR: str = "chroma_db"
+    PERSIST_DIR: str = str(BASE_DIR / "chroma_db")
     
     # ============================================================================
     # DEVICE CONFIGURATION
@@ -116,6 +122,22 @@ class RAGSettings(BaseSettings):
         env_file = ".env"
         extra = "ignore"
     
+    @property
+    def resolved_pdf_path(self) -> Path:
+        """Get the absolute path to the PDF document."""
+        path = Path(self.PDF_PATH)
+        if path.is_absolute():
+            return path
+        return BASE_DIR / path
+
+    @property
+    def resolved_persist_dir(self) -> Path:
+        """Get the absolute path to the vector store directory."""
+        path = Path(self.PERSIST_DIR)
+        if path.is_absolute():
+            return path
+        return BASE_DIR / path
+
     @property
     def effective_device(self) -> str:
         """Determine compute device based on configuration."""

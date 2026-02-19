@@ -156,35 +156,130 @@ async def recommendation_from_json(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/health")
-async def cdss_health_check():
-    """Check CDSS engine configuration and status."""
+from fastapi import status
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from pydantic import BaseModel
+from typing import Any, Dict
+
+# Health check response models
+class ComponentHealth(BaseModel):
+    status: str
+    provider: Optional[str] = None
+    details: Dict[str, Any] = {}
+
+class SystemHealth(BaseModel):
+    overall_status: str
+    database: ComponentHealth
+    vision_model: ComponentHealth
+    llm: ComponentHealth
+    embeddings: ComponentHealth
+    retriever: ComponentHealth
+
+
+@router.get("/systemconfig", response_model=SystemHealth, tags=["System Health"])
+async def cdss_health_check(db: AsyncSession = Depends(get_db)):
+    """Check CDSS engine configuration and health of dependent services."""
     from config.visionconfig import vision_settings
     from config.ragconfig import rag_settings
     from app.visionsystem.vision_client import vision_client
     from app.RAGsystem.llm_client import llm_client
-    
-    return {
-        "status": "healthy",
-        "configuration": {
-            "vision_model": {
-                "provider": vision_settings.VISION_MODEL_PROVIDER,
-                "info": vision_client.get_model_info()
-            },
-            "llm": {
-                "provider": rag_settings.LLM_PROVIDER,
-                "info": llm_client.get_model_info()
-            },
-            "embeddings": {
-                "provider": rag_settings.EMBEDDING_PROVIDER,
-                "model": rag_settings.current_embedding_model
-            },
-            "retriever": {
-                "type": rag_settings.RETRIEVER_TYPE,
-                "k": rag_settings.RETRIEVAL_K,
-                "lambda_multiplier": rag_settings.LAMBDA_MULT if rag_settings.RETRIEVER_TYPE == "mmr" else "N/A",
-                "fetch_k": rag_settings.FETCH_K if rag_settings.RETRIEVER_TYPE == "mmr" else "N/A",
-                "similarity_threshold": rag_settings.SIMILARITY_THRESHOLD if rag_settings.RETRIEVER_TYPE == "similarity_score_threshold" else "N/A"
-            }
+
+    components: Dict[str, Dict] = {}
+    is_healthy = True
+
+    # 1. Database Health
+    try:
+        await db.execute(text("SELECT 1"))
+        components["database"] = {"status": "healthy", "provider": "postgresql"}
+    except Exception as e:
+        is_healthy = False
+        components["database"] = {
+            "status": "unhealthy",
+            "provider": "postgresql",
+            "details": {"error": str(e)},
         }
-    }
+
+    # 2. Vision Model Health
+    try:
+        info = vision_client.get_model_info()
+        components["vision_model"] = {
+            "status": "healthy",
+            "provider": vision_settings.VISION_MODEL_PROVIDER,
+            "details": info,
+        }
+    except Exception as e:
+        is_healthy = False
+        components["vision_model"] = {
+            "status": "unhealthy",
+            "provider": vision_settings.VISION_MODEL_PROVIDER,
+            "details": {"error": str(e)},
+        }
+
+    # 3. LLM Health
+    try:
+        info = llm_client.get_model_info()
+        components["llm"] = {
+            "status": "healthy",
+            "provider": rag_settings.LLM_PROVIDER,
+            "details": info,
+        }
+    except Exception as e:
+        is_healthy = False
+        components["llm"] = {
+            "status": "unhealthy",
+            "provider": rag_settings.LLM_PROVIDER,
+            "details": {"error": str(e)},
+        }
+
+    # 4. Embeddings Configuration
+    try:
+        components["embeddings"] = {
+            "status": "healthy",
+            "provider": rag_settings.EMBEDDING_PROVIDER,
+            "details": {
+                "model": rag_settings.current_embedding_model,
+                "chunk_size": rag_settings.CHUNK_SIZE,
+                "overlap": rag_settings.CHUNK_OVERLAP,
+            },
+            
+        }
+    except Exception as e:
+        is_healthy = False
+        components["embeddings"] = {
+            "status": "unhealthy",
+            "provider": rag_settings.EMBEDDING_PROVIDER,
+            "details": {"error": str(e)},
+        }
+
+    # 5. Retriever Configuration
+    try:
+        retriever_details = {
+            "type": rag_settings.RETRIEVER_TYPE,
+            "k": rag_settings.RETRIEVAL_K,
+        }
+        if rag_settings.RETRIEVER_TYPE == "mmr":
+            retriever_details["lambda_multiplier"] = rag_settings.LAMBDA_MULT
+            retriever_details["fetch_k"] = rag_settings.FETCH_K
+        elif rag_settings.RETRIEVER_TYPE == "similarity_score_threshold":
+            retriever_details["similarity_threshold"] = rag_settings.SIMILARITY_THRESHOLD
+
+        components["retriever"] = {
+            "status": "healthy",
+            "provider": "langchain",
+            "details": retriever_details,
+        }
+    except Exception as e:
+        is_healthy = False
+        components["retriever"] = {
+            "status": "unhealthy",
+            "provider": "langchain",
+            "details": {"error": str(e)},
+        }
+
+    # Final response assembly
+    response_payload = {"overall_status": "healthy" if is_healthy else "unhealthy", **components}
+
+    http_status = status.HTTP_200_OK if is_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return JSONResponse(content=response_payload, status_code=http_status)

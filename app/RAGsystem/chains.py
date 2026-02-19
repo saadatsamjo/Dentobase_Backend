@@ -16,8 +16,7 @@ class ClinicalRAGChain:
         self.llm = ChatOllama(
             model=rag_settings.current_llm_model,
             temperature=rag_settings.LLM_TEMPERATURE,
-            # format=rag_settings.FORMAT
-            format="json"
+            format=rag_settings.FORMAT
         )
         
         # Clinical system prompt

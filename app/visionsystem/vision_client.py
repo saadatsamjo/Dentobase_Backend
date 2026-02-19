@@ -124,6 +124,34 @@ class VisionClient:
             logger.info(f"✅ {provider} client loaded")
         return self._clients[provider]
 
+    def get_model_info(self) -> Dict:
+        """
+        Gets model info from the currently configured vision client.
+        Delegates to the active client's get_model_info method if it exists,
+        otherwise provides basic info from settings.
+        """
+        client = self._get_client()
+
+        if hasattr(client, "get_model_info"):
+            try:
+                return client.get_model_info()
+            except Exception as e:
+                logger.error(f"Underlying vision client get_model_info() failed: {e}")
+                raise
+
+        # logger.warning(
+        #     f"Vision provider '{vision_settings.VISION_MODEL_PROVIDER}' "
+        #     f"client does not have a get_model_info method. Returning config data."
+        # )
+        return {
+            "provider": vision_settings.VISION_MODEL_PROVIDER,
+            "model": vision_settings.current_vision_model,
+            "temperature": vision_settings.VISION_TEMPERATURE,
+            "max_tokens": vision_settings.VISION_MAX_TOKENS,
+            "reliable": False,
+            "notes": "This client does not implement a live health check. Info is from static config.",
+        }
+
     def analyze_dental_radiograph(
         self,
         image: Image.Image,

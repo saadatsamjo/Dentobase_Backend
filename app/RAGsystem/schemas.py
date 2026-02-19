@@ -3,6 +3,9 @@
 from pydantic import BaseModel, Field
 
 
+
+
+
 # ============================================================================
 # PYDANTIC OUTPUT SCHEMAS
 # ============================================================================
@@ -31,3 +34,18 @@ class ClinicalRecommendationOutput(BaseModel):
     #         }
     #     }
     
+    
+    
+    
+class QuestionPayload(BaseModel):
+    question: str
+
+class RAGResponse(BaseModel):
+    answer: str
+    retrieval_strategy: str
+    
+
+class DocumentUploadResponse(BaseModel):
+    message: str
+    filename: str
+    success: bool
