@@ -11,13 +11,14 @@ import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.visionsystem.image_processor import ImageProcessor
 from app.visionsystem.vision_client import vision_client
 from app.visionsystem.vision_schemas import VisionAnalysisResponse
 from config.config_schemas import VisionConfigRequest, VisionConfigResponse
 from config.visionconfig import vision_settings
+from app.users.auth_dependencies import get_current_user_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ async def analyze_dental_radiograph(
     file: UploadFile = File(...),
     context: str = Form(None),
     tooth_number: str = Form(None),
+    user_id: int = Depends(get_current_user_id)
 ):
     """Analyze a single dental radiograph using the configured vision model."""
     logger.info(f"\n{'='*70}")

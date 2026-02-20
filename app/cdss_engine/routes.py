@@ -9,28 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cdss_engine.fusion_engine import CDSSFusionEngine
 from app.cdss_engine.schemas import CDSSRequest, CDSSResponse
 from app.database.connection import get_db
+from app.users.auth_dependencies import get_current_user, get_current_user_id
+
 
 router = APIRouter()
 cdss_engine = CDSSFusionEngine()
 
-# TODO: Replace with actual token extraction
-async def get_current_user_id() -> int:
-    """
-    Get user ID from JWT token.
-    For now, hardcoded to 1.
-    
-    Later implementation:
-    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-    security = HTTPBearer()
-    
-    async def get_current_user_id(
-        credentials: HTTPAuthorizationCredentials = Depends(security)
-    ) -> int:
-        token = credentials.credentials
-        # Decode JWT, extract user_id
-        return user_id
-    """
-    return 1  # Hardcoded for now
 
 @router.post("/provide_final_recommendation", response_model=CDSSResponse)
 async def provide_final_recommendation(

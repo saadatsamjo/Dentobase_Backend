@@ -558,12 +558,13 @@ class CDSSFusionEngine:
 
     async def provide_final_recommendation(
         self,
+        user_id: int,
         patient_id: int,
         chief_complaint: str,
         db: AsyncSession,
         image_bytes: Optional[bytes] = None,
         tooth_numbers: Optional[List[str]] = None,
-        user_id: int = 1,
+        
     ) -> CDSSResponse:
         """Main CDSS pipeline with NoImageProvided support."""
         start_time = time.time()

@@ -29,7 +29,7 @@ from app.users.user_models.user_model import User
 from typing import Optional, Tuple
 from app.database.connection import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.users.dependencies import get_current_user
+from app.users.auth_dependencies import get_current_user
 
 router = APIRouter()
 
@@ -52,6 +52,7 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)) -> Use
         refresh_token=refresh_token,
         token_type="bearer",
         user=user
+        
     )
 
 

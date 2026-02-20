@@ -55,7 +55,7 @@ async def create_access_token(
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     
     # Store as active token
-    from app.system_models.token_model.token_model import Token
+    from app.users.auth_token_model.token_model import Token
     token = Token(
         token_string=encoded_jwt,
         token_type="access",
@@ -90,7 +90,7 @@ async def create_refresh_token(
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     
     # Store token
-    from app.system_models.token_model.token_model import Token
+    from app.users.auth_token_model.token_model import Token
     token = Token(
         token_string=encoded_jwt,
         token_type="refresh",

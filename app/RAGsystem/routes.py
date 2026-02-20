@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -12,6 +12,7 @@ from app.RAGsystem.chains import ClinicalRAGChain, answer_question
 from app.RAGsystem.embeddings import embedding_provider
 from app.RAGsystem.retriever import RetrieverFactory, get_retriever
 from app.RAGsystem.schemas import DocumentUploadResponse, QuestionPayload, RAGResponse
+from app.users.auth_dependencies import get_current_user_id
 from config.config_schemas import RAGConfigRequest, RAGConfigResponse
 from config.ragconfig import rag_settings
 from scripts.ingest_documents import ingest_pdf
@@ -190,7 +191,7 @@ async def update_rag_config(config: RAGConfigRequest):
 
 
 @router.post("/upload_document", response_model=DocumentUploadResponse)
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(file: UploadFile = File(...), user_id: int = Depends(get_current_user_id)):
     """
     Upload a document to the RAG system and trigger ingestion.
 
@@ -210,7 +211,8 @@ async def upload_document(file: UploadFile = File(...)):
         # Save the uploaded file
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-
+            
+        logger.info(f"Document upload by user {user_id}: {file.filename}")
         logger.info(f"📁 File saved to {file_path}")
 
         # Update settings in-memory

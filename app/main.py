@@ -1,26 +1,31 @@
 # app/main.py
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import logging.config
-from config.appconfig import settings
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from contextlib import asynccontextmanager
+
+from config.appconfig import settings
 
 # Apply logging configuration
 logging.config.dictConfig(settings.LOGGING_CONFIG)
 
+from app.cdss_engine.routes import router as cdss_router
+from app.RAGsystem.routes import router as rag_router
+from config.reset_config_route import router as reset_config_route
+from app.system_services.system_routes import router as system_router
+
 # Import routers
 from app.users.auth_routers import router as auth_router
-from app.RAGsystem.routes import router as rag_router
 from app.visionsystem.routes import router as vision_router
-from app.cdss_engine.routes import router as cdss_router
-from app.system_services.system_routes import router as system_router
 
 # Import configurations
 from config.ragconfig import rag_settings
 from config.visionconfig import vision_settings
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,8 +35,12 @@ async def lifespan(app: FastAPI):
     print("\n===============================================================================")
     print("===============================================================================")
     print(f" 🚀 Starting CDSS Server")
-    print(f" ✅ Vision Model: {vision_settings.VISION_MODEL_PROVIDER} - {vision_settings.current_vision_model}")
-    print(f" ✅ RAG Embeddings Provider: {rag_settings.EMBEDDING_PROVIDER} - {rag_settings.current_embedding_model}")
+    print(
+        f" ✅ Vision Model: {vision_settings.VISION_MODEL_PROVIDER} - {vision_settings.current_vision_model}"
+    )
+    print(
+        f" ✅ RAG Embeddings Provider: {rag_settings.EMBEDDING_PROVIDER} - {rag_settings.current_embedding_model}"
+    )
     print(f" ✅ Chunk Size: {rag_settings.CHUNK_SIZE}")
     print(f" ✅ Chunk Overlap: {rag_settings.CHUNK_OVERLAP}")
     print(f" ✅ LLM Provider: {rag_settings.LLM_PROVIDER} - {rag_settings.current_llm_model}")
@@ -50,11 +59,12 @@ async def lifespan(app: FastAPI):
     # Shutdown
     print("👋 Shutting down")
 
+
 app = FastAPI(
     title="Clinical Decision Support System",
     description="Multimodal CDSS with Florence-2 vision and RAG-based clinical guidelines",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Include routers with prefixes
@@ -63,10 +73,10 @@ app.include_router(rag_router, prefix="/api/rag", tags=["Legacy RAG"])
 app.include_router(vision_router, prefix="/api/vision", tags=["Vision Analysis"])
 app.include_router(cdss_router, prefix="/api/cdss", tags=["Clinical Decision Support"])
 app.include_router(system_router, prefix="/api/system", tags=["System Services"])
-
+app.include_router(reset_config_route, prefix="/api/system")
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
 
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

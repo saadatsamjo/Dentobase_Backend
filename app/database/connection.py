@@ -30,8 +30,10 @@ Base = declarative_base()
 
 print(f"✅ Successfully Connected to database: {settings.DB_NAME}")
 
+from typing import AsyncGenerator
+
 # Dependency to get database session
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
