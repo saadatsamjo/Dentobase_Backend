@@ -1,16 +1,19 @@
 # config/ragconfig.py
 """
-RAG System Configuration
+RAG System Configuration - COMPLETE WITH ALL LLM PROVIDERS
 Controls knowledge retrieval and LLM settings for clinical recommendations
+Supports: Ollama, OpenAI, Claude, Groq, Gemini
 """
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from typing import Literal, Optional
 import torch
 import os
 from pathlib import Path
 
-# Calculate the project root (assuming this file is in project_root/config/)
+# Calculate the project root
 BASE_DIR = Path(__file__).resolve().parent.parent
+
 
 class RAGSettings(BaseSettings):
     """Configuration for Clinical Decision Support RAG System"""
@@ -18,125 +21,101 @@ class RAGSettings(BaseSettings):
     # ============================================================================
     # LLM SELECTION (for generating clinical recommendations)
     # ============================================================================
-    # Which LLM to use for final recommendation generation
-    # Options: "ollama", "openai", "claude"
-    LLM_PROVIDER: Literal["ollama", "openai", "claude"] = "ollama"
+    LLM_PROVIDER: Literal["ollama", "openai", "claude", "groq", "gemini"] = "ollama"
     
-    # Ollama LLM Model (if LLM_PROVIDER = "ollama")
-    # OLLAMA_LLM_MODEL: str = "llama3:8b"
+    # ── Ollama LLM Settings (Local, Free) ──
     OLLAMA_LLM_MODEL: str = "llama3.1:8b"
-    # OLLAMA_LLM_MODEL: str = "mixtral:8x7b"
-    # Alternatives: "llama3:70b", "mistral", "mixtral:8x7b"
+    # Alternatives: "llama3:8b", "mixtral:8x7b", "gemma3:4b"
     
-    # OpenAI Model (if LLM_PROVIDER = "openai")
-    OPENAI_LLM_MODEL: str = "gpt-4-turbo-preview"
-    # Alternatives: "gpt-4", "gpt-3.5-turbo"
+    # ── OpenAI Settings (Cloud, Paid) ──
+    OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
+    OPENAI_LLM_MODEL: str = "gpt-4o"
+    # Alternatives: "gpt-4-turbo-preview", "gpt-3.5-turbo"
     
-    # Claude Model (if LLM_PROVIDER = "claude")
+    # ── Claude Settings (Cloud, Paid) ──
+    CLAUDE_API_KEY: str = Field(default="", env="CLAUDE_API_KEY")
     CLAUDE_LLM_MODEL: str = "claude-3-5-sonnet-20241022"
     # Alternatives: "claude-3-opus-20240229", "claude-3-haiku-20240307"
     
+    # ── Groq Settings (NEW - Cloud, Ultra-fast, Free tier) ──
+    # Free tier: 7,000 requests/day!
+    # Best for: Speed-critical applications
+    GROQ_API_KEY: str = Field(default="", env="GROQ_API_KEY")
+    GROQ_LLM_MODEL: str = "llama-3.3-70b-versatile"
+    # Alternatives: "mixtral-8x7b-32768", "llama-3.1-70b-versatile"
+    
+    # ── Gemini Settings (NEW - Google Cloud, Competitive pricing) ──
+    # Free tier: 1,500 requests/day
+    # Best for: Long context (2M tokens), multimodal reasoning
+    GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
+    GEMINI_LLM_MODEL: str = "gemini-2.0-flash-exp"
+    # Alternatives: "gemini-1.5-pro", "gemini-1.5-flash"
+
     # ============================================================================
     # EMBEDDING MODEL SELECTION (for document retrieval)
     # ============================================================================
-    # Which embedding provider to use
-    # Options: "ollama", "huggingface"
     EMBEDDING_PROVIDER: Literal["ollama", "huggingface"] = "ollama"
     
-    # Ollama Embedding Model (if EMBEDDING_PROVIDER = "ollama")
-    OLLAMA_EMBEDDING_MODEL: str =    "nomic-embed-text"  
-    # OLLAMA_EMBEDDING_MODEL: str =    "mxbai-embed-large" 
+    # ── Ollama Embedding Settings ──
+    OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"
+    # Alternatives: "mxbai-embed-large"
     
-    
-    # HuggingFace Embedding Model (if EMBEDDING_PROVIDER = "huggingface")
-    # HF_EMBEDDING_MODEL: str = "BAAI/bge-large-en-v1.5"
-    # HF_EMBEDDING_MODEL: str = "abhinand/MedEmbed-large-v0.1"
+    # ── HuggingFace Embedding Settings ──
     HF_EMBEDDING_MODEL: str = "neuml/pubmedbert-base-embeddings"
-    
-    
+    # Alternatives: "abhinand/MedEmbed-large-v0.1", "BAAI/bge-large-en-v1.5"
+
     # ============================================================================
     # RETRIEVAL SETTINGS
     # ============================================================================
-    # Which retrieval strategy to use
-    # Options: "similarity", "mmr", "multi_query", "similarity_score_threshold"
-    # Recommended: "mmr" for comprehensive clinical coverage
     RETRIEVER_TYPE: Literal["similarity", "mmr", "multi_query", "similarity_score_threshold"] = "mmr"
-    
-    # Number of document chunks to retrieve
-    RETRIEVAL_K: int = 8
-    
-    # Number of candidates to consider (MMR only)
-    FETCH_K: int = 20
-    
-    # Diversity vs relevance trade-off (MMR only)
-    # MMR Lambda Trade-off: 1.0 = Pure Semantic Relevance, 0.0 = Pure Diversity
-    # Use 1.0 for high-stakes precision where you only want the absolute best matches.
-    # This treats it like a standard similarity search (e.g., finding a specific lab value).
-    LAMBDA_MULT: float = 1.0
-    
-    
-    
-    # Minimum similarity threshold (optional, None to disable)
-    SIMILARITY_THRESHOLD: Optional[float] = 0.6
-    
+    RETRIEVAL_K: int = 8              # Number of chunks to retrieve
+    FETCH_K: int = 20                 # MMR: Candidates to consider
+    LAMBDA_MULT: float = 1.0          # MMR: 1.0=relevance, 0.0=diversity
+    SIMILARITY_THRESHOLD: Optional[float] = 0.6  # Min similarity score
+
     # ============================================================================
     # LLM GENERATION SETTINGS
     # ============================================================================
-    # Temperature (0 = deterministic, 1 = creative)
-    LLM_TEMPERATURE: float = 0.0  # Use 0 for clinical consistency
-    FORMAT: Literal["json", "markdown"] = "json"
-    
-    # Maximum tokens in LLM response
+    LLM_TEMPERATURE: float = 0.0      # 0=deterministic (clinical use)
     MAX_TOKENS: int = 1500
-    
-    # Force JSON output (recommended for structured recommendations)
+    FORMAT: Literal["json", "markdown"] = "json"
     FORCE_JSON_OUTPUT: bool = True
-    
+
     # ============================================================================
     # DOCUMENT PROCESSING
     # ============================================================================
-    # Text chunk size for document splitting
-    CHUNK_SIZE: int = 1500  # Optimized for clinical context
-    
-    # Overlap between chunks (maintains context continuity)
-    CHUNK_OVERLAP: int = 100
-    
-    # Path to clinical guidelines PDF (Relative to BASE_DIR or absolute)
-    # If a relative path is provided in .env, it will be joined with BASE_DIR
-    PDF_PATH: str = str(BASE_DIR / "documents" / "stg.pdf") # OR THE ONE DEFINED IN THE ENVIRONMENT VARIABLES, IF NONE IN THE .ENV, THIS WILL BE USED
-    
+    CHUNK_SIZE: int = 1500           # Characters per chunk
+    CHUNK_OVERLAP: int = 100         # Overlap for context continuity
+    PDF_PATH: str = str(BASE_DIR / "documents" / "stg.pdf")
+
     # ============================================================================
     # VECTOR STORE
     # ============================================================================
-    # Directory for persisted vector embeddings
     PERSIST_DIR: str = str(BASE_DIR / "chroma_db")
-    
+
     # ============================================================================
     # DEVICE CONFIGURATION
     # ============================================================================
-    # Compute device for HuggingFace models
-    # Options: "auto", "cuda", "mps", "cpu"
-    DEVICE: str = "auto"
-    
+    DEVICE: str = "auto"  # Options: "auto", "cuda", "mps", "cpu"
+
     class Config:
         env_file = ".env"
         extra = "ignore"
     
+    # ========================================================================
+    # COMPUTED PROPERTIES
+    # ========================================================================
     @property
     def resolved_pdf_path(self) -> Path:
-        """Get the absolute path to the PDF document."""
+        """Get absolute path to PDF document."""
         path = Path(self.PDF_PATH)
-        if path.is_absolute():
-            return path
-        return BASE_DIR / path
+        return path if path.is_absolute() else BASE_DIR / path
 
     @property
     def resolved_persist_dir(self) -> Path:
-        """Get the absolute path to the vector store directory."""
+        """Get absolute path to vector store directory."""
         path = Path(self.PERSIST_DIR)
-        if path.is_absolute():
-            return path
-        return BASE_DIR / path
+        return path if path.is_absolute() else BASE_DIR / path
 
     @property
     def effective_device(self) -> str:
@@ -152,19 +131,22 @@ class RAGSettings(BaseSettings):
     
     @property
     def current_embedding_model(self) -> str:
-        """Get the active embedding model based on provider."""
+        """Get active embedding model based on provider."""
         if self.EMBEDDING_PROVIDER == "ollama":
             return self.OLLAMA_EMBEDDING_MODEL
         return self.HF_EMBEDDING_MODEL
     
     @property
     def current_llm_model(self) -> str:
-        """Get the active LLM model based on provider."""
-        if self.LLM_PROVIDER == "ollama":
-            return self.OLLAMA_LLM_MODEL
-        elif self.LLM_PROVIDER == "openai":
-            return self.OPENAI_LLM_MODEL
-        else:  # claude
-            return self.CLAUDE_LLM_MODEL
+        """Get active LLM model based on provider."""
+        provider_map = {
+            "ollama": self.OLLAMA_LLM_MODEL,
+            "openai": self.OPENAI_LLM_MODEL,
+            "claude": self.CLAUDE_LLM_MODEL,
+            "groq": self.GROQ_LLM_MODEL,
+            "gemini": self.GEMINI_LLM_MODEL,
+        }
+        return provider_map.get(self.LLM_PROVIDER, self.OLLAMA_LLM_MODEL)
+
 
 rag_settings = RAGSettings()

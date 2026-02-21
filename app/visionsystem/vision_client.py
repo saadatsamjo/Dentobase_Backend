@@ -119,6 +119,15 @@ class VisionClient:
             elif provider == "florence":
                 from app.visionsystem.florence_client import florence_client
                 self._clients["florence"] = florence_client
+            elif provider == "groq":
+                from app.visionsystem.groq_vision_client import groq_vision_client
+                self._clients["groq"] = groq_vision_client
+            elif provider == "gemini":
+                from app.visionsystem.gemini_vision_client import gemini_vision_client
+                self._clients["gemini"] = gemini_vision_client
+            elif provider == "gemma3":
+                from app.visionsystem.gemma3_client import gemma3_vision_client
+                self._clients["gemma3"] = gemma3_vision_client
             else:
                 raise ValueError(f"Unknown vision provider: {provider}")
             logger.info(f"✅ {provider} client loaded")
@@ -203,7 +212,7 @@ class VisionClient:
         logger.info(f"   Prompt length: {len(prompt)} chars")
         try:
             response = client.analyze_image(image, prompt)
-            logger.info(f"LLaVA analysis complete: {len(response)} characters")
+            logger.info(f"{provider.upper()} analysis complete: {len(response)} characters")
             return self._parse_structured_response(response, provider, tooth_number)
         except Exception as e:
             logger.error(f"❌ {provider} analysis failed: {e}")

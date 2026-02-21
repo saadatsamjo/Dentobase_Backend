@@ -17,6 +17,7 @@ from app.cdss_engine.routes import router as cdss_router
 from app.RAGsystem.routes import router as rag_router
 from config.reset_config_route import router as reset_config_route
 from app.system_services.system_routes import router as system_router
+from app.shared.cost_routes import router as cost_router
 
 # Import routers
 from app.users.auth_routers import router as auth_router
@@ -62,7 +63,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Clinical Decision Support System",
-    description="Multimodal CDSS with Florence-2 vision and RAG-based clinical guidelines",
+    description="Multimodal CDSS with Vision, RAG, and Clinical Decision Support",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -74,6 +75,7 @@ app.include_router(vision_router, prefix="/api/vision", tags=["Vision Analysis"]
 app.include_router(cdss_router, prefix="/api/cdss", tags=["Clinical Decision Support"])
 app.include_router(system_router, prefix="/api/system", tags=["System Services"])
 app.include_router(reset_config_route, prefix="/api/system")
+app.include_router(cost_router, prefix="/api")
 
 
 if __name__ == "__main__":

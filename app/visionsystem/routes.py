@@ -56,6 +56,8 @@ async def analyze_dental_radiograph(
         detailed_description=result["detailed_description"],
         pathology_summary=result.get("pathology_summary", ""),
         model_used=result.get("model", vision_settings.current_vision_model),
+        processing_time_ms=elapsed * 1000,
+        focused_tooth=tooth_number,
         image_quality_score=result.get("image_quality_score", 0.5),
         diagnostic_confidence=result.get("confidence_score", 0.5),
         structured_findings=result.get("structured_findings"),
@@ -95,14 +97,17 @@ async def test_all_vision_models(
     # (provider_type, ollama_model_override_or_None, label)
     # NOTE: llava:7b is NOT installed - it's llava:latest (4.7 GB, same model)
     models_to_test = [
-        ("llava", "llava:13b", "llava:13b - Recommended open-source"),
-        ("llava", "llama3.2-vision", "llama3.2-vision - Latest from Meta"),
+        ("florence", None, "Florence-2 - Not recommended"),
         ("llava", "llava:latest", "llava:latest - Baseline (7B)"),
+        ("llava", "llava:13b", "llava:13b - Best open-source"),
+        ("llava", "llama3.2-vision", "llama3.2-vision - Meta latest"),
+        ("gemma3", None, "Gemma 3 4B - Google multimodal local"),  # ← NEW
         ("llava_med", None, "LLaVA-Med - Medical specialist (via llava:13b)"),
         ("biomedclip", None, "BiomedCLIP - Pathology classifier (open_clip)"),
-        ("florence", None, "Florence-2 - Not recommended"),
-        ("gpt4v", None, "GPT-4 Vision - Best accuracy"),
+        ("groq", None, "Groq Llama 3.2 90B - Ultra-fast cloud"),  # ← NEW
+        ("gemini", None, "Gemini 2.0 Flash - Google cloud"),  # ← NEW
         ("claude", None, "Claude 3.5 Sonnet - Medical reasoning"),
+        ("gpt4v", None, "GPT-4 Vision - Best accuracy"),
     ]
 
     results = {}
@@ -226,7 +231,16 @@ async def get_vision_config():
         # Model Selection
         vision_model_provider=vision_settings.VISION_MODEL_PROVIDER,
         current_vision_model=vision_settings.current_vision_model,
-        llava_model=vision_settings.LLAVA_MODEL if vision_settings.VISION_MODEL_PROVIDER == "llava" else None,
+        llava_model=vision_settings.LLAVA_MODEL,  #if vision_settings.VISION_MODEL_PROVIDER == "llava" else "N/A",
+        gemma3_model=vision_settings.GEMMA3_MODEL,  # ← NEW
+        groq_vision_model=vision_settings.GROQ_VISION_MODEL,  # ← NEW
+        gemini_vision_model=vision_settings.GEMINI_VISION_MODEL,  # ← NEW
+        openai_vision_model=vision_settings.OPENAI_VISION_MODEL,  # ← NEW
+        claude_vision_model=vision_settings.CLAUDE_VISION_MODEL,  # ← NEW
+        florence_model_name=vision_settings.FLORENCE_MODEL_NAME,
+        llava_med_model=vision_settings.LLAVA_MED_MODEL,
+        biomedclip_model=vision_settings.BIOMEDCLIP_MODEL,
+        
         # Inference Settings
         vision_temperature=vision_settings.VISION_TEMPERATURE,
         vision_max_tokens=vision_settings.VISION_MAX_TOKENS,
@@ -276,6 +290,21 @@ async def update_vision_config(config: VisionConfigRequest):
         if "llava" in vision_client._clients:
             del vision_client._clients["llava"]
         updated_fields.append(f"llava_model → {config.llava_model} (cache cleared)")
+    
+    if config.gemma3_model is not None:
+        vision_settings.GEMMA3_MODEL = config.gemma3_model
+        vision_client._clients = {}
+        updated_fields.append(f"gemma3_model → {config.gemma3_model}")
+    
+    if config.groq_vision_model is not None:
+        vision_settings.GROQ_VISION_MODEL = config.groq_vision_model
+        vision_client._clients = {}
+        updated_fields.append(f"groq_vision_model → {config.groq_vision_model}")
+    
+    if config.gemini_vision_model is not None:
+        vision_settings.GEMINI_VISION_MODEL = config.gemini_vision_model
+        vision_client._clients = {}
+        updated_fields.append(f"gemini_vision_model → {config.gemini_vision_model}")
 
     # ── Inference Settings ──
     if config.vision_temperature is not None:

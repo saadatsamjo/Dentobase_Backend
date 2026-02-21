@@ -57,6 +57,8 @@ async def get_rag_config():
         ollama_llm_model=rag_settings.OLLAMA_LLM_MODEL,
         openai_llm_model=rag_settings.OPENAI_LLM_MODEL,
         claude_llm_model=rag_settings.CLAUDE_LLM_MODEL,
+        groq_llm_model=rag_settings.GROQ_LLM_MODEL,  # ← NEW
+        gemini_llm_model=rag_settings.GEMINI_LLM_MODEL,  # ← NEW
         # Embedding
         embedding_provider=rag_settings.EMBEDDING_PROVIDER,
         current_embedding_model=rag_settings.current_embedding_model,
@@ -118,6 +120,14 @@ async def update_rag_config(config: RAGConfigRequest):
     if config.claude_llm_model is not None:
         rag_settings.CLAUDE_LLM_MODEL = config.claude_llm_model
         updated_fields.append(f"claude_llm_model → {config.claude_llm_model}")
+        
+    if config.groq_llm_model is not None:
+        rag_settings.GROQ_LLM_MODEL = config.groq_llm_model
+        updated_fields.append(f"groq_llm_model → {config.groq_llm_model}")
+
+    if config.gemini_llm_model is not None:
+        rag_settings.GEMINI_LLM_MODEL = config.gemini_llm_model
+        updated_fields.append(f"gemini_llm_model → {config.gemini_llm_model}")
 
     # ── Embedding Provider ──
     if config.embedding_provider is not None:

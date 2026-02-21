@@ -1,10 +1,11 @@
 # config/visionconfig.py
 """
-Vision Model Configuration - COMPLETE AND ORGANIZED
-Supports: LLaVA (7B/13B/Llama3.2), LLaVA-Med, GPT-4V, Claude, Florence, BiomedCLIP
+Vision Model Configuration - COMPLETE WITH ALL MODELS
+Supports: 
+  LOCAL: LLaVA, Gemma3, LLaVA-Med, BiomedCLIP, Florence
+  CLOUD: GPT-4V, Claude, Groq, Gemini
 """
 from typing import Literal
-
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -15,102 +16,75 @@ class VisionSettings(BaseSettings):
     # ========================================================================
     # PRIMARY VISION MODEL SELECTION
     # ========================================================================
-    # Choose which model to use for analysis
-    # Options: "llava", "llava_med", "biomedclip", "gpt4v", "claude", "florence"
-    #
-    # RECOMMENDATIONS (based on your ollama list):
-    #   LOCAL MODELS (Free, No API):
-    #   - "llava" with LLAVA_MODEL="llava:13b" → Best open-source option
-    #   - "llava" with LLAVA_MODEL="llama3.2-vision" → Latest from Meta
-    #   - "llava_med" → Medical-specific (HuggingFace transformers)
-    #   - "biomedclip" → Medical classifier (good for pathology detection)
-    #
-    #   PROPRIETARY (API costs):
-    #   - "gpt4v" → Best accuracy ($0.01/image)
-    #   - "claude" → Excellent reasoning ($0.01/image)
-    #
-    #   NOT RECOMMENDED:
-    #   - "florence" → Poor on dental X-rays
-
     VISION_MODEL_PROVIDER: Literal[
-        "florence", "llava", "llava_med", "biomedclip", "gpt4v", "claude"
-    ] = "llava"
+        "llava",        # Ollama: llava:13b, llama3.2-vision, llava:latest
+        "gemma3",       # Ollama: gemma3:4b, gemma3:12b 
+        "llava_med",    # HuggingFace: Medical specialist
+        "biomedclip",   # HuggingFace: Pathology classifier
+        "florence",     # HuggingFace: General vision (not recommended)
+        "gpt4v",        # OpenAI: Best accuracy, expensive
+        "claude",       # Anthropic: Excellent reasoning
+        "groq",         # Groq: Ultra-fast, cheap 
+        "gemini"        # Google: Multimodal, large context
+    ] = "gemma3"
 
     # ========================================================================
-    # LLAVA SETTINGS (Ollama models)
+    # LOCAL MODELS - OLLAMA (Free, No API)
     # ========================================================================
-    # Your available models from `ollama list`:
-    # - llava:latest - Fast but less accurate
-    # - llava:13b - RECOMMENDED for production
-    # - llama3.2-vision - Latest from Meta, good performance
-
-    # LLAVA_MODEL: str = "llava:latest"
+    
+    # ── LLaVA Settings ──
+    # Available: llava:13b (recommended), llama3.2-vision (Meta latest), llava:latest
     LLAVA_MODEL: str = "llava:13b"
-    # LLAVA_MODEL: str = "llama3.2-vision"
-
-    # ========================================================================
-    # LLAVA-MED SETTINGS (HuggingFace transformers)
-    # ========================================================================
-    # Medical-specific vision model via transformers library
-    # Downloads model from HuggingFace on first use
-    # Available models from your search:
-    # - mradermacher/llava-med-v1.5-mistral-7b-GGUF (recommended)
-    # - sbottazzi/LLaVA-Med_weights_gguf
-
-    # LLAVA_MED_MODEL: str = "sbottazzi/LLaVA-Med_weights_gguf"
-    # LLAVA_MED_MODEL: str = "microsoft/llava-med-v1.5-mistral-7b"
+    
+    # ── Gemma 3 Settings (NEW - Google's multimodal) ──
+    # Available: gemma3:4b (recommended for 16GB RAM), gemma3:12b (better accuracy)
+    # Note: gemma3:4b is vision-capable, gemma3:1b is text-only
+    GEMMA3_MODEL: str = "gemma3:4b"
+    
+    # ── LLaVA-Med Settings (HuggingFace transformers) ──
+    # Medical-specific vision model
     LLAVA_MED_MODEL: str = "mradermacher/llava-med-v1.5-mistral-7b-GGUF"
     LLAVA_MED_DEVICE: str = "cpu"
-
-    # ========================================================================
-    # BIOMEDCLIP SETTINGS (HuggingFace transformers)
-    # ========================================================================
-    # Medical image classifier trained on 15M medical images
-    # Good for pathology detection
-
+    
+    # ── BiomedCLIP Settings (HuggingFace open_clip) ──
+    # Medical pathology classifier
     BIOMEDCLIP_MODEL: str = "microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
     BIOMEDCLIP_DEVICE: str = "cpu"
-
-    # ========================================================================
-    # FLORENCE SETTINGS (HuggingFace - NOT RECOMMENDED)
-    # ========================================================================
-    # You have these cached already:
-    # - microsoft/Florence-2-base (465MB)
-    # - microsoft/Florence-2-large (1.6GB)
-
-    # FLORENCE_MODEL_NAME: str = "microsoft/Florence-2-base"
+    
+    # ── Florence Settings (HuggingFace - not recommended for dental) ──
     FLORENCE_MODEL_NAME: str = "microsoft/Florence-2-large"
+
+    # ========================================================================
+    # CLOUD MODELS - API (Paid/Free Tier)
+    # ========================================================================
     
-    
-    # ========================================================================
-    # PROPRIETARY MODELS SETTINGS
-    # ========================================================================
-    # ========================================================================
-    # OPENAI/CHATGPT SETTINGS
-    # ========================================================================
-    # ChatGPT is a proprietary provider that requires an API key
-    OPENAI_VISION_MODEL: str = "gpt-4-vision-preview"
+    # ── OpenAI Settings ──
     OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
+    OPENAI_VISION_MODEL: str = "gpt-4o"  # or "gpt-4-vision-preview"
     
-    
-    # ========================================================================
-    # ANTHROPIC SETTINGS
-    # ========================================================================
-    # Anthropic is a proprietary provider that requires an API key
+    # ── Anthropic Settings ──
     ANTHROPIC_API_KEY: str = Field(default="", env="ANTHROPIC_API_KEY")
     CLAUDE_VISION_MODEL: str = "claude-3-5-sonnet-20241022"
-
-
     
+    # ── Groq Settings (NEW - Ultra-fast LPU inference) ──
+    # Free tier: 7,000 requests/day!
+    # Models: meta-llama/llama-4-maverick-17b-128e-instruct (best), meta-llama/llama-4-scout-17b-16e-instruct (fast)
+    GROQ_API_KEY: str = Field(default="", env="GROQ_API_KEY")
+    GROQ_VISION_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"  # or "meta-llama/llama-4-maverick-17b-128e-instruct" foe complex reasoning
     
+    # ── Gemini Settings (NEW - Google's multimodal) ──
+    # Free tier: 1,500 requests/day
+    # Models: gemini-2.0-flash-exp (recommended), gemini-1.5-pro, gemini-1.5-flash
+    GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
+    GEMINI_VISION_MODEL: str = "gemini-2.0-flash"  # Fast, cheap, good
 
     # ========================================================================
     # IMAGE PROCESSING
     # ========================================================================
-    MAX_IMAGE_SIZE: int = 1024  # Max dimension
+    MAX_IMAGE_SIZE: int = 1024  # Max dimension for preprocessing
     SUPPORTED_FORMATS: list = ["image/jpeg", "image/png", "image/webp"]
-
-    # X-ray enhancement (only for LLaVA)
+    
+    # X-ray contrast enhancement (experimental)
     ENHANCE_CONTRAST: bool = False
     CONTRAST_FACTOR: float = 1.5
     BRIGHTNESS_FACTOR: float = 1.2
@@ -121,11 +95,10 @@ class VisionSettings(BaseSettings):
     VISION_TEMPERATURE: float = 0.0  # Deterministic for clinical use
     VISION_MAX_TOKENS: int = 1500
     REQUEST_TIMEOUT: int = 30
-
-    # Whether to include clinical notes in vision prompt
-    # (disabled for Florence due to token limits)
+    
+    # Include clinical notes in vision prompt
     INCLUDE_CLINICAL_NOTES_IN_VISION_MODEL_PROMPT: bool = True
-
+    
     # Dual-prompt analysis (detailed + pathology-focused)
     DUAL_PROMPT_ANALYSIS: bool = True
 
@@ -135,19 +108,18 @@ class VisionSettings(BaseSettings):
     @property
     def current_vision_model(self) -> str:
         """Get the active model name for display"""
-        if self.VISION_MODEL_PROVIDER == "llava":
-            return self.LLAVA_MODEL
-        elif self.VISION_MODEL_PROVIDER == "llava_med":
-            return self.LLAVA_MED_MODEL
-        elif self.VISION_MODEL_PROVIDER == "biomedclip":
-            return self.BIOMEDCLIP_MODEL
-        elif self.VISION_MODEL_PROVIDER == "gpt4v":
-            return self.OPENAI_VISION_MODEL
-        elif self.VISION_MODEL_PROVIDER == "claude":
-            return self.CLAUDE_VISION_MODEL
-        else:  # florence
-            return self.FLORENCE_MODEL_NAME
-        
+        provider_map = {
+            "llava": self.LLAVA_MODEL,
+            "gemma3": self.GEMMA3_MODEL,
+            "llava_med": self.LLAVA_MED_MODEL,
+            "biomedclip": self.BIOMEDCLIP_MODEL,
+            "florence": self.FLORENCE_MODEL_NAME,
+            "gpt4v": self.OPENAI_VISION_MODEL,
+            "claude": self.CLAUDE_VISION_MODEL,
+            "groq": self.GROQ_VISION_MODEL,
+            "gemini": self.GEMINI_VISION_MODEL,
+        }
+        return provider_map.get(self.VISION_MODEL_PROVIDER, "unknown")
 
     class Config:
         env_file = ".env"
