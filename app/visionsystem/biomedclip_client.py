@@ -119,7 +119,7 @@ class BiomedCLIPClient:
             logger.error(f"❌ BiomedCLIP classification failed: {e}")
             raise
 
-    def analyze_image(self, image: Image.Image, prompt: str = None) -> str:
+    def analyze_image(self, image: Image.Image, prompt: str = None) -> dict:
         """Backward compatibility - returns formatted text of classification."""
         result = self.classify_pathology(image)
 
@@ -137,7 +137,11 @@ class BiomedCLIPClient:
             bar = "█" * int(score * 30)
             lines.append(f"  {pathology:<28} {score:.1%}  {bar}")
 
-        return "\n".join(lines)
+        return {
+            "text": "\n".join(lines),
+            "input_tokens": None,
+            "output_tokens": None,
+        }
 
 
 # Global instance

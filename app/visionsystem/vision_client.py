@@ -185,11 +185,13 @@ class VisionClient:
     def _analyze_with_florence(self, client, image, context=None, tooth_number=None):
         logger.info("⚠️  Florence-2: Using simple task token (no context support)")
         try:
-            response = client.analyze_image(image, "<MORE_DETAILED_CAPTION>")
-            logger.info(f"Analysis complete: {len(response)} chars")
-            return {"structured_findings": None, "narrative_analysis": response, "model": "florence",
-                    "detailed_description": response, "pathology_summary": "Florence-2 general description",
-                    "confidence_score": 0.5, "image_quality_score": 0.5}
+            response_dict = client.analyze_image(image, "<MORE_DETAILED_CAPTION>")
+            response_text = response_dict["text"]
+            logger.info(f"Analysis complete: {len(response_text)} chars")
+            return {"structured_findings": None, "narrative_analysis": response_text, "model": "florence",
+                    "detailed_description": response_text, "pathology_summary": "Florence-2 general description",
+                    "confidence_score": 0.5, "image_quality_score": 0.5,
+                    "input_tokens": None, "output_tokens": None}
         except Exception as e:
             return self._error_response("florence", str(e))
 
@@ -199,10 +201,17 @@ class VisionClient:
             result = client.classify_pathology(image)
             if "error" in result:
                 return self._error_response("biomedclip", result["error"])
+            
+            # The analyze_image method now returns a dict, but we only need the text for the summary.
+            # We will call it to get the formatted text summary.
+            analysis_result = client.analyze_image(image)
+            detailed_description = analysis_result['text']
+
             summary = f"BiomedCLIP: {result['prediction']} ({result['confidence']:.1%})"
             return {"structured_findings": None, "narrative_analysis": summary, "model": "biomedclip",
-                    "detailed_description": client.analyze_image(image), "pathology_summary": summary,
-                    "confidence_score": result["confidence"], "image_quality_score": 0.5}
+                    "detailed_description": detailed_description, "pathology_summary": summary,
+                    "confidence_score": result["confidence"], "image_quality_score": 0.5,
+                    "input_tokens": None, "output_tokens": None}
         except Exception as e:
             return self._error_response("biomedclip", str(e))
 
@@ -211,9 +220,18 @@ class VisionClient:
         logger.info(f"📤 Sending structured prompt to {provider}")
         logger.info(f"   Prompt length: {len(prompt)} chars")
         try:
-            response = client.analyze_image(image, prompt)
-            logger.info(f"{provider.upper()} analysis complete: {len(response)} characters")
-            return self._parse_structured_response(response, provider, tooth_number)
+            response_dict = client.analyze_image(image, prompt)
+            response_text = response_dict["text"]
+            input_tokens = response_dict.get("input_tokens")
+            output_tokens = response_dict.get("output_tokens")
+            
+            logger.info(f"{provider.upper()} analysis complete: {len(response_text)} characters")
+            
+            parsed_response = self._parse_structured_response(response_text, provider, tooth_number)
+            parsed_response["input_tokens"] = input_tokens
+            parsed_response["output_tokens"] = output_tokens
+            return parsed_response
+
         except Exception as e:
             logger.error(f"❌ {provider} analysis failed: {e}")
             raise

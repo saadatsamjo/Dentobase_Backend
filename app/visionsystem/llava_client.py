@@ -76,7 +76,7 @@ class LlavaClient:
         image.save(buffer, format="PNG")
         return base64.b64encode(buffer.getvalue()).decode()
     
-    def analyze_image(self, image: Image.Image, prompt: str = None) -> str:
+    def analyze_image(self, image: Image.Image, prompt: str = None) -> dict:
         """
         Analyze dental image using LLaVA.
         
@@ -85,7 +85,7 @@ class LlavaClient:
             prompt: Custom prompt or None for default dental analysis
         
         Returns:
-            Clinical description string
+            Dict with 'text', 'input_tokens', 'output_tokens'
         """
         model_name = self._get_model_name()
         
@@ -124,7 +124,17 @@ Your analyses are precise, use proper dental terminology, and focus on clinicall
             
             result = response["message"]["content"]
             logger.info(f"LLaVA analysis complete: {len(result)} characters")
-            return result
+            
+            # Extract token counts
+            input_tokens = response.get("prompt_eval_count")
+            output_tokens = response.get("eval_count")
+            logger.info(f"   Token usage: {input_tokens} prompt, {output_tokens} completion")
+
+            return {
+                "text": result,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
             
         except Exception as e:
             logger.error(f"LLaVA analysis failed: {e}")
@@ -137,9 +147,15 @@ Your analyses are precise, use proper dental terminology, and focus on clinicall
         Returns:
             dict with detailed_description and region_findings (pathology summary)
         """
+        input_tokens = 0
+        output_tokens = 0
+        
         # Main detailed analysis
         try:
-            detailed = self.analyze_image(image, DENTAL_XRAY_PROMPT)
+            analysis_result = self.analyze_image(image, DENTAL_XRAY_PROMPT)
+            detailed = analysis_result["text"]
+            input_tokens += analysis_result.get("input_tokens", 0)
+            output_tokens += analysis_result.get("output_tokens", 0)
         except Exception as e:
             logger.error(f"Detailed analysis failed: {e}")
             detailed = f"Analysis failed: {str(e)}"
@@ -148,7 +164,10 @@ Your analyses are precise, use proper dental terminology, and focus on clinicall
         pathology = None
         if vision_settings.DUAL_PROMPT_ANALYSIS:
             try:
-                pathology = self.analyze_image(image, PATHOLOGY_CHECKLIST_PROMPT)
+                pathology_result = self.analyze_image(image, PATHOLOGY_CHECKLIST_PROMPT)
+                pathology = pathology_result["text"]
+                input_tokens += pathology_result.get("input_tokens", 0)
+                output_tokens += pathology_result.get("output_tokens", 0)
             except Exception as e:
                 logger.error(f"Pathology checklist failed: {e}")
                 pathology = "Pathology assessment unavailable"
@@ -156,7 +175,9 @@ Your analyses are precise, use proper dental terminology, and focus on clinicall
         return {
             "detailed_description": detailed,
             "region_findings": pathology or "See detailed description",
-            "model": self._get_model_name()
+            "model": self._get_model_name(),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
         }
 
 

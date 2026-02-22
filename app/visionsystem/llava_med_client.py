@@ -43,7 +43,7 @@ class LlavaMedClient:
         """ Return the current LLM model name """
         return rag_settings.current_llm_model
 
-    def analyze_image(self, image: Image.Image, prompt: str) -> str:
+    def analyze_image(self, image: Image.Image, prompt: str) -> dict:
         """
         Analyze image using llava:13b with medical specialist system prompt.
         This approximates LLaVA-Med behavior using available local models.
@@ -102,7 +102,17 @@ You always provide structured, clinically actionable findings."""
 
             result = response["message"]["content"]
             logger.info(f"✅ LLaVA-Med response: {len(result)} chars")
-            return result
+
+            # Extract token counts
+            input_tokens = response.get("prompt_eval_count")
+            output_tokens = response.get("eval_count")
+            logger.info(f"   Token usage: {input_tokens} prompt, {output_tokens} completion")
+
+            return {
+                "text": result,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
 
         except Exception as e:
             logger.error(f"❌ LLaVA-Med (Ollama) failed: {e}")
@@ -111,11 +121,17 @@ You always provide structured, clinically actionable findings."""
     def analyze_clinical_image(self, image: Image.Image) -> dict:
         """Backward compatibility."""
         try:
-            result = self.analyze_image(image, "Analyze this dental radiograph.")
+            analysis_result = self.analyze_image(image, "Analyze this dental radiograph.")
+            detailed = analysis_result["text"]
+            input_tokens = analysis_result.get("input_tokens", 0)
+            output_tokens = analysis_result.get("output_tokens", 0)
+            
             return {
-                "detailed_description": result,
+                "detailed_description": detailed,
                 "region_findings": "See detailed description",
                 "model": f"llava_med_via_{self._get_model_name()}",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens
             }
         except Exception as e:
             return {

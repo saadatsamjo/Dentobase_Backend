@@ -50,7 +50,7 @@ class GroqVisionClient:
         except Exception as e:
             logger.error(f"❌ Groq client initialization failed: {e}")
     
-    def analyze_image(self, image: Image.Image, prompt: str) -> str:
+    def analyze_image(self, image: Image.Image, prompt: str) -> dict:
         """
         Analyze dental radiograph using Groq vision model.
         
@@ -59,7 +59,7 @@ class GroqVisionClient:
             prompt: Text prompt for analysis
         
         Returns:
-            str: Model response text
+            Dict with 'text', 'input_tokens', 'output_tokens'
         """
         from config.visionconfig import vision_settings
         
@@ -101,8 +101,17 @@ class GroqVisionClient:
             )
             
             result = response.choices[0].message.content
+            usage = response.usage
             logger.info(f"✅ Groq analysis complete: {len(result)} chars")
-            return result
+            if usage:
+                logger.info(f"   Token usage: {usage.prompt_tokens} prompt, {usage.completion_tokens} completion")
+                return {
+                    "text": result,
+                    "input_tokens": usage.prompt_tokens,
+                    "output_tokens": usage.completion_tokens,
+                }
+            else:
+                return {"text": result, "input_tokens": None, "output_tokens": len(result.split())}
         
         except Exception as e:
             error_msg = str(e)

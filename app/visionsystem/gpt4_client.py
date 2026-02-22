@@ -116,7 +116,7 @@ class GPT4VisionClient:
         image.save(buffer, format="PNG")
         return base64.b64encode(buffer.getvalue()).decode()
 
-    def analyze_image(self, image: Image.Image, prompt: str = None) -> str:
+    def analyze_image(self, image: Image.Image, prompt: str = None) -> dict:
         """Analyze dental radiograph using GPT-4o."""
         client = self._get_client()
         b64_image = self._encode_image(image)
@@ -149,8 +149,18 @@ class GPT4VisionClient:
             )
 
             result = response.choices[0].message.content
+            usage = response.usage
             logger.info(f"GPT-4o analysis complete: {len(result)} characters")
-            return result
+            if usage:
+                logger.info(f"   Token usage: {usage.prompt_tokens} prompt, {usage.completion_tokens} completion")
+                return {
+                    "text": result,
+                    "input_tokens": usage.prompt_tokens,
+                    "output_tokens": usage.completion_tokens,
+                }
+            else:
+                # Fallback if usage is not reported for some reason
+                return {"text": result, "input_tokens": None, "output_tokens": len(result.split())}
 
         except Exception as e:
             logger.error(f"GPT-4o analysis failed: {e}")
@@ -159,7 +169,10 @@ class GPT4VisionClient:
     def analyze_clinical_image(self, image: Image.Image) -> dict:
         """Comprehensive dental radiograph analysis."""
         # Main detailed analysis
-        detailed = self.analyze_image(image, DENTAL_XRAY_PROMPT)
+        analysis_result = self.analyze_image(image, DENTAL_XRAY_PROMPT)
+        detailed = analysis_result["text"]
+        input_tokens = analysis_result.get("input_tokens", 0)
+        output_tokens = analysis_result.get("output_tokens", 0)
 
         # Optional pathology summary
         pathology = None
@@ -175,7 +188,10 @@ class GPT4VisionClient:
                         5. Other findings: List any other abnormalities
 
                         Format as structured bullet points."""
-                pathology = self.analyze_image(image, pathology_prompt)
+                pathology_result = self.analyze_image(image, pathology_prompt)
+                pathology = pathology_result["text"]
+                input_tokens += pathology_result.get("input_tokens", 0)
+                output_tokens += pathology_result.get("output_tokens", 0)
             except Exception as e:
                 logger.error(f"Pathology summary failed: {e}")
 
@@ -183,6 +199,8 @@ class GPT4VisionClient:
             "detailed_description": detailed,
             "region_findings": pathology or "See detailed description",
             "model": self._get_model_name(),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
         }
 
 

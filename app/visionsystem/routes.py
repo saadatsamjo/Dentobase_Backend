@@ -19,6 +19,7 @@ from app.visionsystem.vision_schemas import VisionAnalysisResponse
 from config.config_schemas import VisionConfigRequest, VisionConfigResponse
 from config.visionconfig import vision_settings
 from app.users.auth_dependencies import get_current_user_id
+from app.shared.performance_tracker import performance_tracker
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -137,6 +138,21 @@ async def test_all_vision_models(
                 image, context=context, tooth_number=tooth_number
             )
             elapsed = (time.time() - start) * 1000
+
+            # Record performance metrics
+            input_tokens = result.get("input_tokens")
+            output_tokens = result.get("output_tokens")
+
+            performance_tracker.record(
+                model_name=model_label, 
+                inference_time_ms=elapsed,
+                confidence_score=result.get("confidence_score"),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens if output_tokens is not None else len(result.get("detailed_description", "").split()),
+                context_provided=context is not None,
+                tooth_number_provided=tooth_number is not None,
+            )
+            logger.info(f"📊 Recorded performance metrics for {model_label}")
 
             if result.get("error"):
                 logger.error(f"❌ {provider} returned error: {result['error']}")

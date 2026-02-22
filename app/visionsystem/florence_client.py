@@ -57,7 +57,7 @@ class FlorenceClient:
         logger.info(f"✅Florence-2 ready on {device}")
         return self._processor, self._model
 
-    def analyze_image(self, image: Image.Image, prompt: str = None) -> str:
+    def analyze_image(self, image: Image.Image, prompt: str = None) -> dict:
         """Clinical image analysis."""
         processor, model = self.load_model()
         device = next(model.parameters()).device
@@ -103,22 +103,36 @@ class FlorenceClient:
             if isinstance(parsed, dict) and task_prompt in parsed:
                 result = parsed[task_prompt]
                 logger.info(f"Analysis complete: {len(str(result))} chars")
-                return str(result)
+                return {
+                    "text": str(result),
+                    "input_tokens": None,
+                    "output_tokens": None,
+                }
             else:
-                return str(parsed)
+                return {
+                    "text": str(parsed),
+                    "input_tokens": None,
+                    "output_tokens": None,
+                }
 
         except Exception as e:
             logger.warning(f"Post-processing failed: {e}")
             # Fallback: clean up raw text
             cleaned = generated_text.replace(task_prompt, "").strip()
             cleaned = cleaned.replace("</s>", "").replace("<s>", "").strip()
-            return cleaned
+            return {
+                "text": cleaned,
+                "input_tokens": None,
+                "output_tokens": None,
+            }
 
     def analyze_clinical_image(self, image: Image.Image) -> dict:
         """Comprehensive clinical analysis with multiple prompts."""
+        detailed_result = self.analyze_image(image, "<MORE_DETAILED_CAPTION>")
+        region_result = self.analyze_image(image, "<DENSE_REGION_CAPTION>")
         return {
-            "detailed_description": self.analyze_image(image, "<MORE_DETAILED_CAPTION>"),
-            "region_findings": self.analyze_image(image, "<DENSE_REGION_CAPTION>"),
+            "detailed_description": detailed_result["text"],
+            "region_findings": region_result["text"],
             "model": vision_settings.FLORENCE_MODEL_NAME,
         }
 

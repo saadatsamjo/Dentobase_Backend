@@ -31,7 +31,7 @@ class Gemma3VisionClient:
         image.save(buffer, format="PNG")
         return base64.b64encode(buffer.getvalue()).decode()
     
-    def analyze_image(self, image: Image.Image, prompt: str) -> str:
+    def analyze_image(self, image: Image.Image, prompt: str) -> dict:
         """
         Analyze dental image using Gemma 3.
         """
@@ -62,7 +62,17 @@ class Gemma3VisionClient:
             
             result = response["message"]["content"]
             logger.info(f"✅ Gemma 3 analysis complete: {len(result)} chars")
-            return result
+            
+            # Extract token counts
+            input_tokens = response.get("prompt_eval_count")
+            output_tokens = response.get("eval_count")
+            logger.info(f"   Token usage: {input_tokens} prompt, {output_tokens} completion")
+
+            return {
+                "text": result,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
             
         except Exception as e:
             logger.error(f"❌ Gemma 3 analysis failed: {e}")

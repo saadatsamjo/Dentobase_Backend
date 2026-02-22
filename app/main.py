@@ -13,18 +13,18 @@ from config.appconfig import settings
 # Apply logging configuration
 logging.config.dictConfig(settings.LOGGING_CONFIG)
 
+# Import routers
 from app.cdss_engine.routes import router as cdss_router
 from app.RAGsystem.routes import router as rag_router
-from config.reset_config_route import router as reset_config_route
-from app.system_services.system_routes import router as system_router
 from app.shared.cost_routes import router as cost_router
-
-# Import routers
+from app.system_services.system_routes import router as system_router
 from app.users.auth_routers import router as auth_router
 from app.visionsystem.routes import router as vision_router
+from app.shared.evaluation_routes import router as evaluation_router
 
 # Import configurations
 from config.ragconfig import rag_settings
+from config.reset_config_route import router as reset_config_route
 from config.visionconfig import vision_settings
 
 
@@ -76,6 +76,7 @@ app.include_router(cdss_router, prefix="/api/cdss", tags=["Clinical Decision Sup
 app.include_router(system_router, prefix="/api/system", tags=["System Services"])
 app.include_router(reset_config_route, prefix="/api/system")
 app.include_router(cost_router, prefix="/api")
+app.include_router(evaluation_router, prefix="/api")
 
 
 if __name__ == "__main__":

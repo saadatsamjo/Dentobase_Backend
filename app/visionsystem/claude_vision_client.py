@@ -100,7 +100,7 @@ class ClaudeVisionClient:
         image.save(buffer, format="PNG")
         return base64.b64encode(buffer.getvalue()).decode()
     
-    def analyze_image(self, image: Image.Image, prompt: str = None) -> str:
+    def analyze_image(self, image: Image.Image, prompt: str = None) -> dict:
         """Analyze dental radiograph using Claude Vision."""
         client = self._get_client()
         b64_image = self._encode_image(image)
@@ -136,8 +136,17 @@ class ClaudeVisionClient:
             )
             
             result = response.content[0].text
+            usage = response.usage
             logger.info(f"Claude analysis complete: {len(result)} characters")
-            return result
+            if usage:
+                logger.info(f"   Token usage: {usage.input_tokens} input, {usage.output_tokens} output")
+                return {
+                    "text": result,
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                }
+            else:
+                return {"text": result, "input_tokens": None, "output_tokens": len(result.split())}
             
         except Exception as e:
             logger.error(f"Claude Vision analysis failed: {e}")
@@ -146,7 +155,10 @@ class ClaudeVisionClient:
     def analyze_clinical_image(self, image: Image.Image) -> dict:
         """Comprehensive dental radiograph analysis."""
         # Single comprehensive analysis (Claude is good with complex prompts)
-        detailed = self.analyze_image(image, DENTAL_XRAY_PROMPT)
+        analysis_result = self.analyze_image(image, DENTAL_XRAY_PROMPT)
+        detailed = analysis_result["text"]
+        input_tokens = analysis_result.get("input_tokens", 0)
+        output_tokens = analysis_result.get("output_tokens", 0)
         
         # Optional pathology-focused summary
         pathology = None
@@ -159,14 +171,19 @@ class ClaudeVisionClient:
                     - Other abnormalities: present/absent, details if present
 
                     Format as concise bullet points."""
-                pathology = self.analyze_image(image, pathology_prompt)
+                pathology_result = self.analyze_image(image, pathology_prompt)
+                pathology = pathology_result["text"]
+                input_tokens += pathology_result.get("input_tokens", 0)
+                output_tokens += pathology_result.get("output_tokens", 0)
             except Exception as e:
                 logger.error(f"Pathology summary failed: {e}")
         
         return {
             "detailed_description": detailed,
             "region_findings": pathology or "See detailed description",
-            "model": self._get_model_name()
+            "model": self._get_model_name(),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
         }
 
 # Global instance
