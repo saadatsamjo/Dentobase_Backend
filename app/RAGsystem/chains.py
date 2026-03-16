@@ -1,9 +1,9 @@
 # app/RAGsystem/chains.py
-from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda, RunnableParallel
 from config.ragconfig import rag_settings
+from app.RAGsystem.llm_providers import get_llm_by_provider
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,11 +13,8 @@ class ClinicalRAGChain:
     
     def __init__(self, retriever):
         self.retriever = retriever
-        self.llm = ChatOllama(
-            model=rag_settings.current_llm_model,
-            temperature=rag_settings.LLM_TEMPERATURE,
-            format=rag_settings.FORMAT
-        )
+        # Get LLM instance based on provider
+        self.llm = get_llm_by_provider()
         
         # Clinical system prompt
         self.system_prompt = """You are a Clinical Decision Support System analyzing dental/oral health guidelines.

@@ -3,7 +3,7 @@
 CDSS Request/Response Schemas - Updated with NoImageProvided handling
 """
 from pydantic import BaseModel, Field
-from typing import List, Optional, Literal, Union
+from typing import List, Optional, Literal, Union, Dict, Any
 from datetime import datetime
 
 # ============================================================================
@@ -27,10 +27,24 @@ class PatientHistory(BaseModel):
 # ============================================================================
 class ImageObservation(BaseModel):
     """Structured radiograph analysis from vision model."""
+    structured_findings: Optional[Dict[str, Any]] = Field(
+        None, 
+        description="Highly structured pathology findings (caries, bone loss, etc.)"
+    )
     raw_description: str = Field(..., description="Full clinical analysis from vision model")
     pathology_summary: str = Field(..., description="Focused pathology findings")
-    confidence: Literal["high", "medium", "low"] = "medium"
+    focused_tooth: Optional[str] = Field(None, description="Tooth number that was the focus of analysis")
+    image_quality_score: float = Field(0.5, description="0-1 score for image quality")
+    diagnostic_confidence: float = Field(0.5, description="0-1 score for diagnostic confidence")
+    overall_confidence: Literal["high", "medium", "low"] = Field(
+        "medium", 
+        description="Categorical confidence level",
+        alias="confidence"
+    )
     model_used: str = Field(..., description="Which vision model was used")
+    
+    class Config:
+        populate_by_name = True
 
 class NoImageProvided(BaseModel):
     """Indicator that no image was provided in the request."""
@@ -146,26 +160,3 @@ class CDSSResponse(BaseModel):
                 }
             }
         }
-
-# ============================================================================
-# VISION-ONLY RESPONSE (for /analyze_image endpoint)
-# ============================================================================
-class VisionAnalysisResponse(BaseModel):
-    """Response from vision analysis endpoint."""
-    detailed_description: str = Field(..., description="Complete radiograph analysis")
-    pathology_summary: str = Field(..., description="Key pathological findings")
-    model_used: str = Field(..., description="Vision model used")
-    processing_time_ms: float = Field(..., description="Analysis time in milliseconds")
-    confidence: Literal["high", "medium", "low"] = "medium"
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "detailed_description": "Periapical radiograph of tooth #19 shows...",
-                "pathology_summary": "Mesial caries, mild bone loss",
-                "model_used": "llava:13b",
-                "processing_time_ms": 3420.5,
-                "confidence": "high"
-            }
-        }
-        

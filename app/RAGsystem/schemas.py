@@ -41,6 +41,8 @@ class QuestionPayload(BaseModel):
 class RAGResponse(BaseModel):
     answer: Union[Dict[str, Any], str]  # Can be dict or string
     retrieval_strategy: str
+    llm_provider: Optional[str] = None
+    model_used: Optional[str] = None
 
 
 class DocumentUploadResponse(BaseModel):

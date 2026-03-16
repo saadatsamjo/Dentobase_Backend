@@ -153,10 +153,38 @@ VISION_MODEL_SPECS: Dict[str, ModelSpecs] = {
         supports_vision=True,
         context_window=128000
     ),
+    "gpt4v": ModelSpecs(
+        name="gpt4v",
+        display_name="GPT-4o Vision (Alias)",
+        size_gb=None,
+        params_billions=None,
+        requires_gpu=False,
+        min_ram_gb=4,
+        min_vram_gb=None,
+        quantization=None,
+        provider="cloud",
+        platform="openai",
+        supports_vision=True,
+        context_window=128000
+    ),
     
     "claude-3-5-sonnet-20241022": ModelSpecs(
         name="claude-3-5-sonnet-20241022",
         display_name="Claude 3.5 Sonnet",
+        size_gb=None,
+        params_billions=None,
+        requires_gpu=False,
+        min_ram_gb=4,
+        min_vram_gb=None,
+        quantization=None,
+        provider="cloud",
+        platform="anthropic",
+        supports_vision=True,
+        context_window=200000
+    ),
+    "claude": ModelSpecs(
+        name="claude",
+        display_name="Claude 3.5 Sonnet (Alias)",
         size_gb=None,
         params_billions=None,
         requires_gpu=False,
@@ -187,6 +215,20 @@ VISION_MODEL_SPECS: Dict[str, ModelSpecs] = {
     "gemini-1.5-flash": ModelSpecs(
         name="gemini-1.5-flash",
         display_name="Gemini 1.5 Flash",
+        size_gb=None,
+        params_billions=None,
+        requires_gpu=False,
+        min_ram_gb=4,
+        min_vram_gb=None,
+        quantization=None,
+        provider="cloud",
+        platform="google",
+        supports_vision=True,
+        context_window=1000000
+    ),
+    "gemini": ModelSpecs(
+        name="gemini",
+        display_name="Gemini 2.5 Flash (Alias)",
         size_gb=None,
         params_billions=None,
         requires_gpu=False,
@@ -303,11 +345,17 @@ LLM_MODEL_SPECS: Dict[str, ModelSpecs] = {
 # ============================================================================
 
 MODEL_PRICING = {
-    # Vision models
+    # Vision models - Premium
     "gpt-4o": {
         "input_per_1m": 2.50,
         "output_per_1m": 10.00,
         "per_image": 0.00765,  # 1024x1024 image
+        "currency": "USD"
+    },
+    "gpt4v": {
+        "input_per_1m": 2.50,
+        "output_per_1m": 10.00,
+        "per_image": 0.00765,
         "currency": "USD"
     },
     "claude-3-5-sonnet-20241022": {
@@ -316,16 +364,55 @@ MODEL_PRICING = {
         "per_image": 0.012,
         "currency": "USD"
     },
+    "claude-3-haiku-20240307": {
+        "input_per_1m": 0.25,
+        "output_per_1m": 1.25,
+        "per_image": 0.0,
+        "currency": "USD"
+    },
+    "claude": {
+        "input_per_1m": 3.00,
+        "output_per_1m": 15.00,
+        "per_image": 0.012,
+        "currency": "USD"
+    },
+    
+    # Vision models - Fast/Cheap
     "llama-3.2-11b-vision-preview": {
         "input_per_1m": 0.18,
         "output_per_1m": 0.18,
-        "per_image": 0.0,  # Included
+        "per_image": 0.0,
         "currency": "USD"
     },
+    "meta-llama/llama-4-scout-17b-16e-instruct": {
+        "input_per_1m": 0.10,
+        "output_per_1m": 0.10,
+        "per_image": 0.0,
+        "currency": "USD"
+    },
+    "groq": {
+        "input_per_1m": 0.18,
+        "output_per_1m": 0.18,
+        "per_image": 0.0,
+        "currency": "USD"
+    },
+    
     "gemini-1.5-flash": {
         "input_per_1m": 0.075,
         "output_per_1m": 0.30,
-        "per_image": 0.0,  # Included
+        "per_image": 0.0,
+        "currency": "USD"
+    },
+    "gemini-2.5-flash": {
+        "input_per_1m": 0.075,
+        "output_per_1m": 0.30,
+        "per_image": 0.0,
+        "currency": "USD"
+    },
+    "gemini": {
+        "input_per_1m": 0.075,
+        "output_per_1m": 0.30,
+        "per_image": 0.0,
         "currency": "USD"
     },
     
@@ -342,7 +429,7 @@ MODEL_PRICING = {
         model: {"input_per_1m": 0.0, "output_per_1m": 0.0, "per_image": 0.0, "currency": "USD"}
         for model in [
             "llava:13b", "llava:latest", "llama3.2-vision", "gemma3:4b", "gemma3:12b",
-            "biomedclip", "florence", "llama3.1:8b", "mixtral:8x7b"
+            "biomedclip", "florence", "llama3.1:8b", "mixtral:8x7b", "gemma3", "llava_med"
         ]
     }
 }

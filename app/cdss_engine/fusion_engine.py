@@ -21,6 +21,7 @@ from app.cdss_engine.schemas import (
     PatientHistory,
     RetrievedKnowledge,
 )
+from app.cdss_engine.tooth_validator import tooth_validator
 from app.RAGsystem.llm_client import llm_client
 from app.RAGsystem.retriever import RetrieverFactory
 from app.system_models.clinical_note_model.clinical_note_model import ClinicalNote
@@ -29,7 +30,6 @@ from app.visionsystem.image_processor import ImageProcessor
 from app.visionsystem.vision_client import vision_client
 from config.ragconfig import rag_settings
 from config.visionconfig import vision_settings
-from app.cdss_engine.tooth_validator import tooth_validator
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,7 @@ class CDSSFusionEngine:
             age = None
             if patient.dob:
                 from datetime import datetime
+
                 today = datetime.now().date()
                 age = (
                     today.year
@@ -104,7 +105,9 @@ class CDSSFusionEngine:
                             "author_id": note.author_id,
                         }
                     )
-                    logger.info(f"   [{i}] {note.created_at.strftime('%Y-%m-%d')} - {note.note_type}")
+                    logger.info(
+                        f"   [{i}] {note.created_at.strftime('%Y-%m-%d')} - {note.note_type}"
+                    )
                     logger.info(f"       {note.content[:100]}...")
             else:
                 logger.info(f"   No previous clinical notes found")
@@ -182,7 +185,7 @@ class CDSSFusionEngine:
             image,
             context=enhanced_context,
             clinical_notes=clinical_notes_text,
-            tooth_number=tooth_numbers[0] if tooth_numbers else None
+            tooth_number=tooth_numbers[0] if tooth_numbers else None,
         )
 
         # Extract scores
@@ -205,8 +208,6 @@ class CDSSFusionEngine:
         logger.info(f"   Diagnostic Confidence: {confidence_score:.2f}")
         logger.info(f"   Overall Confidence: {confidence_level}")
 
-
-
         # Log structured findings if available
         if result.get("structured_findings"):
             logger.info(f"\n{'─'*70}")
@@ -218,12 +219,18 @@ class CDSSFusionEngine:
             logger.info(f"Image Quality: {findings.get('image_quality', 'unknown')}")
             logger.info(f"\nPathology Findings:")
             logger.info(f"  Caries: {'Yes' if findings.get('caries', {}).get('present') else 'No'}")
-            if findings.get('caries', {}).get('present'):
+            if findings.get("caries", {}).get("present"):
                 logger.info(f"    Location: {findings['caries'].get('location')}")
-            logger.info(f"  Periapical: {'Yes' if findings.get('periapical_pathology', {}).get('present') else 'No'}")
-            if findings.get('periapical_pathology', {}).get('present'):
-                logger.info(f"    Location: Tooth {findings['periapical_pathology'].get('location')}")
-            logger.info(f"  Bone Loss: {'Yes' if findings.get('bone_loss', {}).get('present') else 'No'}")
+            logger.info(
+                f"  Periapical: {'Yes' if findings.get('periapical_pathology', {}).get('present') else 'No'}"
+            )
+            if findings.get("periapical_pathology", {}).get("present"):
+                logger.info(
+                    f"    Location: Tooth {findings['periapical_pathology'].get('location')}"
+                )
+            logger.info(
+                f"  Bone Loss: {'Yes' if findings.get('bone_loss', {}).get('present') else 'No'}"
+            )
             logger.info(f"\nPrimary Finding: {findings.get('primary_finding', 'None')}")
             logger.info(f"Severity: {findings.get('severity', 'unknown')}")
             logger.info(f"Urgency: {findings.get('urgency', 'unknown')}")
@@ -247,7 +254,7 @@ class CDSSFusionEngine:
     ):
         """
         Retrieve knowledge with a clean, pathology-specific query.
-        
+
         FIX: Do NOT use pathology_summary (may contain TOOTH_NUMBER_HERE junk).
         Instead, build a clean query from structured_findings directly.
         """
@@ -263,7 +270,7 @@ class CDSSFusionEngine:
         if image_obs and image_obs.structured_findings:
             sf = image_obs.structured_findings
             tooth = image_obs.focused_tooth or sf.get("focused_tooth", "")
-            
+
             pathologies = []
             if sf.get("caries", {}).get("present"):
                 severity = sf["caries"].get("severity", "")
@@ -274,7 +281,9 @@ class CDSSFusionEngine:
 
             if sf.get("bone_loss", {}).get("present"):
                 bl = sf["bone_loss"]
-                pathologies.append(f"{bl.get('severity', '')} {bl.get('type', '')} periodontal bone loss".strip())
+                pathologies.append(
+                    f"{bl.get('severity', '')} {bl.get('type', '')} periodontal bone loss".strip()
+                )
 
             if sf.get("root_canal_treatment", {}).get("present"):
                 pathologies.append("root canal treatment endodontic")
@@ -347,26 +356,21 @@ class CDSSFusionEngine:
             logger.error(f"❌ Retrieval error: {e}", exc_info=True)
             return [], []
 
-
-
-
-
-
     def _calculate_confidence(
         self,
         image_obs: Optional[ImageObservation],
         knowledge: List[RetrievedKnowledge],
         clinical_notes: List[dict],
-        tooth_number_specified: bool
+        tooth_number_specified: bool,
     ) -> tuple[float, dict]:
         """
         Calculate scientific confidence score based on multiple factors.
-        
+
         Returns:
             (overall_score, factor_breakdown)
         """
         factors = {}
-        
+
         # 1. Image quality factor (0-1)
         if image_obs:
             factors["image_quality"] = image_obs.image_quality_score
@@ -374,7 +378,7 @@ class CDSSFusionEngine:
         else:
             factors["image_quality"] = 0.0
             factors["radiographic_confidence"] = 0.0
-        
+
         # 2. Knowledge availability factor (0-1)
         if len(knowledge) >= 5:
             factors["knowledge_availability"] = 1.0
@@ -384,7 +388,7 @@ class CDSSFusionEngine:
             factors["knowledge_availability"] = 0.5
         else:
             factors["knowledge_availability"] = 0.2
-        
+
         # 3. Clinical context factor (0-1)
         clinical_context_score = 0.5  # baseline
         if clinical_notes:
@@ -392,7 +396,7 @@ class CDSSFusionEngine:
         if tooth_number_specified:
             clinical_context_score += 0.2
         factors["clinical_context"] = min(clinical_context_score, 1.0)
-        
+
         # 4. Consistency factor (0-1) - Do findings align?
         # If we have both image and knowledge, they should agree
         if image_obs and knowledge:
@@ -400,18 +404,18 @@ class CDSSFusionEngine:
             factors["consistency"] = 0.8
         else:
             factors["consistency"] = 0.6
-        
+
         # Calculate weighted overall score
         weights = {
             "image_quality": 0.25,
             "radiographic_confidence": 0.30,
             "knowledge_availability": 0.25,
             "clinical_context": 0.10,
-            "consistency": 0.10
+            "consistency": 0.10,
         }
-        
+
         overall_score = sum(factors[k] * weights[k] for k in factors.keys())
-        
+
         return overall_score, factors
 
     def fuse_and_reason(
@@ -422,7 +426,8 @@ class CDSSFusionEngine:
         image_obs: Optional[ImageObservation],
         knowledge: List[RetrievedKnowledge],
         available_pages: List[int],
-        tooth_numbers: Optional[List[str]] = None
+        tooth_numbers: Optional[List[str]] = None,
+        image_analysis_error: Optional[str] = None,
     ) -> ClinicalRecommendation:
         """Generate recommendation with tooth number enforcement."""
         logger.info(f"\n{'='*70}")
@@ -435,10 +440,7 @@ class CDSSFusionEngine:
 
         # Calculate scientific confidence
         confidence_score, confidence_factors = self._calculate_confidence(
-            image_obs,
-            knowledge,
-            clinical_notes,
-            bool(tooth_numbers)
+            image_obs, knowledge, clinical_notes, bool(tooth_numbers)
         )
 
         # Derive confidence level
@@ -456,7 +458,7 @@ class CDSSFusionEngine:
         for factor, score in confidence_factors.items():
             logger.info(f"     - {factor}: {score:.3f}")
 
-        # Build contexts
+        # Building and enhancing contexts
         patient_ctx = f"""Patient Demographics:
                 - ID: {patient_history.patient_id}
                 - Age: {patient_history.age or 'Unknown'}, Gender: {patient_history.gender or 'Unknown'}
@@ -472,21 +474,24 @@ class CDSSFusionEngine:
         image_ctx = ""
         if image_obs:
             image_ctx = f"""Radiographic Analysis ({image_obs.model_used}):"""
-            
+
             if image_obs.focused_tooth:
                 image_ctx += f"\n\n CRITICAL - FOCUSED ANALYSIS ON TOOTH #{image_obs.focused_tooth}"
                 image_ctx += f"\nAll radiographic findings relate to tooth #{image_obs.focused_tooth} unless explicitly stated otherwise.\n"
-            
+
             if image_obs.structured_findings:
                 import json
+
                 image_ctx += f"\n\nSTRUCTURED FINDINGS:\n{json.dumps(image_obs.structured_findings, indent=2)}\n"
-            
+
             image_ctx += f"\n\nNARRATIVE ANALYSIS:\n{image_obs.raw_description}\n"
             image_ctx += f"\nKEY PATHOLOGY:\n{image_obs.pathology_summary}"
             image_ctx += f"\n\nImage Quality: {image_obs.image_quality_score:.2f}/1.0"
             image_ctx += f"\nDiagnostic Confidence: {image_obs.diagnostic_confidence:.2f}/1.0"
+        elif image_analysis_error:
+            image_ctx = f"⚠️ Image provided but ANALYSIS FAILED: {image_analysis_error}"
         else:
-            image_ctx = "No radiograph provided."
+            image_ctx = "⚠️ No radiograph provided."
 
         # Guidelines context
         if knowledge_available:
@@ -555,7 +560,6 @@ class CDSSFusionEngine:
                 llm_provider=rag_settings.LLM_PROVIDER,
             )
 
-
     async def provide_final_recommendation(
         self,
         user_id: int,
@@ -564,7 +568,6 @@ class CDSSFusionEngine:
         db: AsyncSession,
         image_bytes: Optional[bytes] = None,
         tooth_numbers: Optional[List[str]] = None,
-        
     ) -> CDSSResponse:
         """Main CDSS pipeline with NoImageProvided support."""
         start_time = time.time()
@@ -593,25 +596,22 @@ class CDSSFusionEngine:
         # CRITICAL: Initialize both variables
         image_obs = None
         no_image_message = None
-        
+        analysis_error = None
+
         # Try image analysis if image provided
         if image_bytes:
-            try:
-                image_obs = self.analyze_radiograph(
-                    image_bytes,
-                    chief_complaint,
-                    f"{patient_history.age}y {patient_history.gender}",
-                    tooth_numbers,
-                    clinical_notes,
-                )
-            except Exception as e:
-                logger.error(f"❌ Image analysis failed: {e}")
-                # image_obs stays None, will create NoImageProvided below
+            image_obs = self.analyze_radiograph(
+                image_bytes,
+                chief_complaint,
+                f"{patient_history.age}y {patient_history.gender}",
+                tooth_numbers,
+                clinical_notes,
+            )
 
         # CRITICAL FIX: Create NoImageProvided if no successful image analysis
         if image_obs is None:
             no_image_message = NoImageProvided(
-                message="No radiograph image was provided for this consultation" if not image_bytes else "Image analysis failed",
+                message="No radiograph image was provided for this consultation",
                 image_required=False,
             )
             logger.info(f"  \n⚠️  No image analysis available")
@@ -619,7 +619,14 @@ class CDSSFusionEngine:
         knowledge, available_pages = self.retrieve_knowledge(chief_complaint, image_obs)
 
         recommendation = self.fuse_and_reason(
-            patient_history, clinical_notes, chief_complaint, image_obs, knowledge, available_pages, tooth_numbers
+            patient_history,
+            clinical_notes,
+            chief_complaint,
+            image_obs,
+            knowledge,
+            available_pages,
+            tooth_numbers,
+            image_analysis_error=analysis_error
         )
 
         # ============================================================
@@ -629,31 +636,37 @@ class CDSSFusionEngine:
             logger.info(f"{'='*70}")
             logger.info(f"🔍 VALIDATING TOOTH NUMBER CONSISTENCY")
             logger.info(f"{'='*70}")
-            
+
             validation = tooth_validator.validate_and_fix(
                 focus_tooth=tooth_numbers[0],
-                vision_teeth=image_obs.structured_findings.get('teeth_visible', []) if image_obs.structured_findings else [],
+                vision_teeth=(
+                    image_obs.structured_findings.get("teeth_visible", [])
+                    if image_obs.structured_findings
+                    else []
+                ),
                 diagnosis=recommendation.diagnosis,
-                image_obs=image_obs.__dict__ if hasattr(image_obs, '__dict__') else image_obs
+                image_obs=image_obs.__dict__ if hasattr(image_obs, "__dict__") else image_obs,
             )
-            
+
             if not validation["valid"]:
                 logger.warning(f"⚠️  Validation issues detected:")
                 for issue in validation["issues"]:
                     logger.warning(f"     - {issue}")
-                
+
                 # Apply fixes
                 if "corrected_diagnosis" in validation["fixes"]:
                     recommendation.diagnosis = validation["fixes"]["corrected_diagnosis"]
                     logger.info(f"✅ FIXED: Updated diagnosis")
-                
+
                 if "corrected_teeth_visible" in validation["fixes"]:
                     if image_obs.structured_findings:
-                        image_obs.structured_findings["teeth_visible"] = validation["fixes"]["corrected_teeth_visible"]
+                        image_obs.structured_findings["teeth_visible"] = validation["fixes"][
+                            "corrected_teeth_visible"
+                        ]
                         logger.info(f"✅ FIXED: Corrected visible teeth")
             else:
                 logger.info(f"✅ All validations passed")
-            
+
             logger.info(f"{'='*70}")
         # ============================================================
         # END VALIDATION
@@ -673,7 +686,9 @@ class CDSSFusionEngine:
 
         return CDSSResponse(
             recommendation=recommendation,
-            image_observations=image_obs if image_obs else no_image_message,  # CRITICAL: Use proper object
+            image_observations=(
+                image_obs if image_obs else no_image_message
+            ),  # CRITICAL: Use proper object
             knowledge_sources=knowledge,
             reasoning_chain=f"""Analysis:
                     1. Patient: {patient_id}, {patient_history.age}y {patient_history.gender}
@@ -689,9 +704,15 @@ class CDSSFusionEngine:
                 "knowledge_chunks": len(knowledge),
                 "clinical_notes_count": len(clinical_notes),
                 "retriever_type": rag_settings.RETRIEVER_TYPE,
-                "diversity": rag_settings.LAMBDA_MULT if rag_settings.RETRIEVER_TYPE == "mmr" else None,
+                "diversity": (
+                    rag_settings.LAMBDA_MULT if rag_settings.RETRIEVER_TYPE == "mmr" else None
+                ),
                 "fetch_k": rag_settings.FETCH_K if rag_settings.RETRIEVER_TYPE == "mmr" else None,
-                "similarity_threshold": rag_settings.SIMILARITY_THRESHOLD if rag_settings.RETRIEVER_TYPE == "similarity_score_threshold" else None,
+                "similarity_threshold": (
+                    rag_settings.SIMILARITY_THRESHOLD
+                    if rag_settings.RETRIEVER_TYPE == "similarity_score_threshold"
+                    else None
+                ),
                 "llm_provider": rag_settings.LLM_PROVIDER,
                 "llm_model": rag_settings.current_llm_model,
                 "vision_provider": vision_settings.VISION_MODEL_PROVIDER if image_obs else "N/A",

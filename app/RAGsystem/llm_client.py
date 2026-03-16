@@ -7,10 +7,8 @@ import logging
 import re
 from typing import Dict, List, Optional
 
-from langchain_ollama import ChatOllama
-from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
 from config.ragconfig import rag_settings
+from app.RAGsystem.llm_providers import get_llm_by_provider
 
 logger = logging.getLogger(__name__)
 
@@ -82,25 +80,7 @@ class LLMClient:
     
     def _get_llm_client(self):
         """Get simple LLM client (no structured output)"""
-        provider = rag_settings.LLM_PROVIDER
-        
-        if provider == "ollama":
-            return ChatOllama(
-                model=rag_settings.OLLAMA_LLM_MODEL,
-                temperature=rag_settings.LLM_TEMPERATURE
-            )
-        elif provider == "openai":
-            return ChatOpenAI(
-                model=rag_settings.OPENAI_LLM_MODEL,
-                temperature=rag_settings.LLM_TEMPERATURE
-            )
-        elif provider == "claude":
-            return ChatAnthropic(
-                model=rag_settings.CLAUDE_LLM_MODEL,
-                temperature=rag_settings.LLM_TEMPERATURE
-            )
-        else:
-            raise ValueError(f"Unknown provider: {provider}")
+        return get_llm_by_provider()
     
     def _build_simple_prompt(
         self,

@@ -13,29 +13,30 @@ class ImageProcessor:
     @staticmethod
     def preprocess_image(image_bytes: bytes, max_size: int = None) -> Image.Image:
         """
-        Preprocess uploaded image for Florence-2.
+        Preprocess uploaded image for vision model.
+        Converts to RGB, resizes if too large, and ensures proper format.
         """
         max_size = max_size or vision_settings.MAX_IMAGE_SIZE
         
         try:
-            # Load image from bytes
+            # Loading image from bytes
             image = Image.open(io.BytesIO(image_bytes))
             logger.info(f"Loaded image: {image.format}, mode={image.mode}, size={image.size}")
             
-            # Convert to RGB (Florence-2 requires RGB)
+            # Converting to RGB if necessary
             if image.mode != 'RGB':
                 logger.info(f"Converting image from {image.mode} to RGB")
                 image = image.convert('RGB')
             
-            # Resize if too large (maintain aspect ratio)
+            # Resizing if too large (maintain aspect ratio)
             if max(image.size) > max_size:
                 ratio = max_size / max(image.size)
                 new_size = (int(image.size[0] * ratio), int(image.size[1] * ratio))
                 image = image.resize(new_size, Image.Resampling.LANCZOS)
                 logger.info(f"Resized image to {new_size}")
             
-            # Ensure image is in proper format for transformers
-            # Save to buffer and reload to ensure clean format
+            # Ensuring image is in proper format for transformers
+            # Saving to buffer and reload to ensure clean format
             buffer = io.BytesIO()
             image.save(buffer, format='PNG')
             buffer.seek(0)

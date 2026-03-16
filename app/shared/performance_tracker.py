@@ -84,6 +84,11 @@ class PerformanceMetrics:
     
     # Model confidence (if available)
     confidence_score: Optional[float] = None
+    image_quality_score: Optional[float] = None  # 0-1 score for image quality
+    
+    # Clinical Summary (for qualitative comparison)
+    primary_finding: Optional[str] = None
+    teeth_visible: Optional[List[str]] = None
     
     # ══════════════════════════════════════════════════════════
     # RELIABILITY METRICS (System Stability)
@@ -137,15 +142,22 @@ class PerformanceTracker:
         schema_valid: bool = True,
         citation_count: int = 0,
         confidence_score: Optional[float] = None,
+        image_quality_score: Optional[float] = None,
+        avg_citation_quality: Optional[float] = None,
+        # Clinical Summary (for qualitative comparison)
+        primary_finding: Optional[str] = None,
+        teeth_visible: Optional[List[str]] = None,
         # Cost metrics
         input_tokens: Optional[int] = None,
         output_tokens: Optional[int] = None,
         cost_usd: Optional[float] = None,
         # System metrics
         tokens_per_second: Optional[float] = None,
+        time_to_first_token_ms: Optional[float] = None,
         # Reliability
         request_success: bool = True,
         error_type: Optional[str] = None,
+        error_message: Optional[str] = None,
         # Metadata
         test_type: str = "vision_analysis",
         model_provider: str = "local",
@@ -171,6 +183,11 @@ class PerformanceTracker:
             total_tokens = input_tokens + output_tokens
             cost_usd = cost_usd or calculate_cost(model_name, input_tokens, output_tokens)
             cost_per_token = cost_usd / total_tokens if total_tokens > 0 else None
+        elif output_tokens:
+            # Handle cases where only output tokens are known (common for local models)
+            total_tokens = output_tokens
+            cost_usd = cost_usd or calculate_cost(model_name, 0, output_tokens)
+            cost_per_token = cost_usd / total_tokens if total_tokens > 0 else None
         else:
             total_tokens = None
             cost_per_token = None
@@ -191,6 +208,7 @@ class PerformanceTracker:
             # Performance
             inference_time_ms=inference_time_ms,
             tokens_per_second=tokens_per_second,
+            time_to_first_token_ms=time_to_first_token_ms,
             # Resources
             peak_ram_mb=peak_ram_mb,
             avg_cpu_percent=avg_cpu,
@@ -205,14 +223,21 @@ class PerformanceTracker:
             response_complete=response_complete,
             schema_valid=schema_valid,
             citation_count=citation_count,
+            avg_citation_quality=avg_citation_quality,
             confidence_score=confidence_score,
+            image_quality_score=image_quality_score,
+            primary_finding=primary_finding,
+            teeth_visible=teeth_visible,
             # Reliability
             request_success=request_success,
             error_type=error_type,
+            error_message=error_message,
             # Metadata
             test_type=test_type,
             model_provider=model_provider,
-            hardware_tier=hardware_tier
+            hardware_tier=hardware_tier,
+            context_provided=context_provided,
+            tooth_number_provided=tooth_number_provided
         )
         
         self.results.append(metric)

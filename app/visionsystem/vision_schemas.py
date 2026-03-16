@@ -14,6 +14,12 @@ class VisionAnalysisResponse(BaseModel):
         None,
         description="Structured pathology findings if available"
     )
+
+    # Full probabilities (BiomedCLIP)
+    probabilities: Optional[Dict[str, float]] = Field(
+        None,
+        description="Full probability distribution for classification models"
+    )
     
     # Narrative components
     detailed_description: str = Field(..., description="Complete analysis")

@@ -142,7 +142,7 @@ class RAGConfigRequest(BaseModel):
     gemini_llm_model: Optional[str] = Field(
         None,
         description="Gemini model name (NEW)",
-        examples=["gemini-2.0-flash-exp", "gemini-1.5-pro"]
+        examples=["gemini-2.0-flash", "gemini-1.5-pro"]
     )
     
     # Embedding Provider and Models

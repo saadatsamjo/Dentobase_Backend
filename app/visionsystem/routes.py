@@ -1,7 +1,6 @@
 # app/visionsystem/routes.py
 """
-Vision System Routes - FIXED v2
-Fixes:
+Vision System Routes
 1. llava:7b -> llava:latest (actual installed model name from ollama list)
 2. BiomedCLIP properly loads via open_clip (open-clip-torch is installed)
 3. LLaVA-Med routes through Ollama with medical system prompt
@@ -56,12 +55,13 @@ async def analyze_dental_radiograph(
     return VisionAnalysisResponse(
         detailed_description=result["detailed_description"],
         pathology_summary=result.get("pathology_summary", ""),
-        model_used=result.get("model", vision_settings.current_vision_model),
+        model_used=f"{vision_settings.VISION_MODEL_PROVIDER} - {vision_settings.current_vision_model}",
         processing_time_ms=elapsed * 1000,
         focused_tooth=tooth_number,
         image_quality_score=result.get("image_quality_score", 0.5),
         diagnostic_confidence=result.get("confidence_score", 0.5),
         structured_findings=result.get("structured_findings"),
+        probabilities=result.get("structured_findings", {}).get("probabilities") if result.get("structured_findings") else None,
     )
 
 
@@ -96,17 +96,16 @@ async def test_all_vision_models(
     image = ImageProcessor.preprocess_image(content)
 
     # (provider_type, ollama_model_override_or_None, label)
-    # NOTE: llava:7b is NOT installed - it's llava:latest (4.7 GB, same model)
     models_to_test = [
         ("florence", None, "Florence-2 - Not recommended"),
+        ("biomedclip", None, "BiomedCLIP - Pathology classifier (open_clip)"),
         ("llava", "llava:latest", "llava:latest - Baseline (7B)"),
         ("llava", "llava:13b", "llava:13b - Best open-source"),
         ("llava", "llama3.2-vision", "llama3.2-vision - Meta latest"),
-        ("gemma3", None, "Gemma 3 4B - Google multimodal local"),  # ← NEW
         ("llava_med", None, "LLaVA-Med - Medical specialist (via llava:13b)"),
-        ("biomedclip", None, "BiomedCLIP - Pathology classifier (open_clip)"),
-        ("groq", None, "Groq Llama 3.2 90B - Ultra-fast cloud"),  # ← NEW
-        ("gemini", None, "Gemini 2.0 Flash - Google cloud"),  # ← NEW
+        ("gemma3", None, "Gemma 3 4B - Google multimodal local"),  
+        ("groq", None, "Groq Llama 3.2 90B - Ultra-fast cloud"), 
+        ("gemini", None, "Gemini 2.0 Flash - Google cloud"), 
         ("claude", None, "Claude 3.5 Sonnet - Medical reasoning"),
         ("gpt4v", None, "GPT-4 Vision - Best accuracy"),
     ]
@@ -121,7 +120,7 @@ async def test_all_vision_models(
         logger.info(f"{'─'*70}")
 
         model_label = ollama_model if ollama_model else provider
-        result_key = f"{provider}_{model_label.replace(':', '_').replace('.', '_')}"
+        result_key = f"{provider}_{model_label.replace(':', '_').replace('.', '_').replace('-', '_')}"
 
         try:
             # Switch provider
@@ -142,11 +141,22 @@ async def test_all_vision_models(
             # Record performance metrics
             input_tokens = result.get("input_tokens")
             output_tokens = result.get("output_tokens")
+            structured = result.get("structured_findings")
+
+            # Fallback for models that don't return structured findings (Florence, BiomedCLIP)
+            primary_finding = None
+            if structured:
+                primary_finding = structured.get("primary_finding")
+            else:
+                primary_finding = result.get("pathology_summary")
 
             performance_tracker.record(
                 model_name=model_label, 
                 inference_time_ms=elapsed,
                 confidence_score=result.get("confidence_score"),
+                image_quality_score=result.get("image_quality_score"),
+                primary_finding=primary_finding,
+                teeth_visible=structured.get("teeth_visible") if structured else None,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens if output_tokens is not None else len(result.get("detailed_description", "").split()),
                 context_provided=context is not None,
@@ -163,7 +173,6 @@ async def test_all_vision_models(
                 }
                 continue
 
-            structured = result.get("structured_findings")
             results[result_key] = {
                 "success": True,
                 "description": description,
@@ -247,12 +256,12 @@ async def get_vision_config():
         # Model Selection
         vision_model_provider=vision_settings.VISION_MODEL_PROVIDER,
         current_vision_model=vision_settings.current_vision_model,
-        llava_model=vision_settings.LLAVA_MODEL,  #if vision_settings.VISION_MODEL_PROVIDER == "llava" else "N/A",
-        gemma3_model=vision_settings.GEMMA3_MODEL,  # ← NEW
-        groq_vision_model=vision_settings.GROQ_VISION_MODEL,  # ← NEW
-        gemini_vision_model=vision_settings.GEMINI_VISION_MODEL,  # ← NEW
-        openai_vision_model=vision_settings.OPENAI_VISION_MODEL,  # ← NEW
-        claude_vision_model=vision_settings.CLAUDE_VISION_MODEL,  # ← NEW
+        llava_model=vision_settings.LLAVA_MODEL,
+        gemma3_model=vision_settings.GEMMA3_MODEL,
+        groq_vision_model=vision_settings.GROQ_VISION_MODEL,  
+        gemini_vision_model=vision_settings.GEMINI_VISION_MODEL, 
+        openai_vision_model=vision_settings.OPENAI_VISION_MODEL,
+        claude_vision_model=vision_settings.CLAUDE_VISION_MODEL,
         florence_model_name=vision_settings.FLORENCE_MODEL_NAME,
         llava_med_model=vision_settings.LLAVA_MED_MODEL,
         biomedclip_model=vision_settings.BIOMEDCLIP_MODEL,

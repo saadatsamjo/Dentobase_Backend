@@ -87,6 +87,7 @@ def get_llm_by_provider(provider: str = None):
         return ChatOllama(
             model=rag_settings.OLLAMA_LLM_MODEL,
             temperature=rag_settings.LLM_TEMPERATURE,
+            format="json",
         )
     
     elif provider == "openai":
@@ -95,6 +96,7 @@ def get_llm_by_provider(provider: str = None):
             model=rag_settings.OPENAI_LLM_MODEL,
             temperature=rag_settings.LLM_TEMPERATURE,
             max_tokens=rag_settings.MAX_TOKENS,
+            api_key=rag_settings.OPENAI_API_KEY,
         )
     
     elif provider == "claude":
@@ -103,6 +105,7 @@ def get_llm_by_provider(provider: str = None):
             model=rag_settings.CLAUDE_LLM_MODEL,
             temperature=rag_settings.LLM_TEMPERATURE,
             max_tokens=rag_settings.MAX_TOKENS,
+            api_key=rag_settings.CLAUDE_API_KEY,
         )
     
     elif provider == "groq":

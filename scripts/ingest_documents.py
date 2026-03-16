@@ -99,22 +99,38 @@ def ingest_pdf(pdf_path: str = None):
 
     # Create/update ChromaDB
     persist_dir = rag_settings.resolved_persist_dir
-    logger.info(f"💾 Creating vector store...")
+    logger.info(f"💾 Initializing vector store...")
     logger.info(f"   Directory: {persist_dir}")
     print("=======================================================================\n")
 
-    # Remove old ChromaDB if it exists
-    if persist_dir.exists():
-        print("=======================================================================\n")
-        logger.info(f"   Deleting old ChromaDB at: {persist_dir}")
-        shutil.rmtree(persist_dir)
-        logger.info(f"   Old ChromaDB deleted.")
-
     try:
-        vectorstore = Chroma.from_documents(
-            documents=chunks, embedding=embeddings, persist_directory=str(persist_dir)
+        # Initialize the client first to manage collections
+        import chromadb
+        client = chromadb.PersistentClient(path=str(persist_dir))
+        
+        # Clear existing collection if it exists to ensure a fresh start
+        collection_name = "langchain" # Default name used by LangChain Chroma
+        try:
+            # Check if collection exists and delete it
+            collections = client.list_collections()
+            if any(c.name == collection_name for c in collections):
+                logger.info(f"   Clearing existing collection: {collection_name}")
+                client.delete_collection(name=collection_name)
+                logger.info(f"   Collection cleared.")
+        except Exception as e:
+            logger.warning(f"   Could not clear collection: {e}")
+
+        # Now create the LangChain Chroma instance using the existing client
+        vectorstore = Chroma(
+            client=client,
+            collection_name=collection_name,
+            embedding_function=embeddings
         )
-        logger.info(f"✅Vector store created successfully")
+        
+        # Add documents to the cleared/new collection
+        vectorstore.add_documents(documents=chunks)
+        
+        logger.info(f"✅Vector store updated successfully")
 
         # Verify
         collection = vectorstore._collection
@@ -163,7 +179,13 @@ if __name__ == "__main__":
     print("=" * 60 + "\n")
     print("=======================================================================\n")
 
-    success = ingest_pdf()
+    # Check for CLI argument
+    pdf_to_ingest = None
+    if len(sys.argv) > 1:
+        pdf_to_ingest = sys.argv[1]
+        logger.info(f"📌 Using PDF from argument: {pdf_to_ingest}")
+
+    success = ingest_pdf(pdf_to_ingest)
 
     if success:
         print("\n" + "=" * 60)

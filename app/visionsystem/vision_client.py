@@ -188,8 +188,12 @@ class VisionClient:
             response_dict = client.analyze_image(image, "<MORE_DETAILED_CAPTION>")
             response_text = response_dict["text"]
             logger.info(f"Analysis complete: {len(response_text)} chars")
+            
+            # Use a snippet of the description as the summary
+            summary = response_text[:200] + "..." if len(response_text) > 200 else response_text
+            
             return {"structured_findings": None, "narrative_analysis": response_text, "model": "florence",
-                    "detailed_description": response_text, "pathology_summary": "Florence-2 general description",
+                    "detailed_description": response_text, "pathology_summary": summary,
                     "confidence_score": 0.5, "image_quality_score": 0.5,
                     "input_tokens": None, "output_tokens": None}
         except Exception as e:
@@ -202,16 +206,29 @@ class VisionClient:
             if "error" in result:
                 return self._error_response("biomedclip", result["error"])
             
-            # The analyze_image method now returns a dict, but we only need the text for the summary.
-            # We will call it to get the formatted text summary.
+            # The analyze_image method returns the text-based bar chart
             analysis_result = client.analyze_image(image)
             detailed_description = analysis_result['text']
 
-            summary = f"BiomedCLIP: {result['prediction']} ({result['confidence']:.1%})"
-            return {"structured_findings": None, "narrative_analysis": summary, "model": "biomedclip",
-                    "detailed_description": detailed_description, "pathology_summary": summary,
-                    "confidence_score": result["confidence"], "image_quality_score": 0.5,
-                    "input_tokens": None, "output_tokens": None}
+            # This is the key clinical finding for BiomedCLIP
+            summary = f"Classification: {result['prediction']} ({result['confidence']:.1%})"
+            
+            # Put the breakdown into structured_findings so it's accessible as data
+            return {
+                "structured_findings": {
+                    "probabilities": result.get("all_scores"),
+                    "primary_finding": result["prediction"],
+                    "confidence": result["confidence"]
+                }, 
+                "narrative_analysis": summary, 
+                "model": "biomedclip",
+                "detailed_description": detailed_description, 
+                "pathology_summary": summary,
+                "confidence_score": result["confidence"], 
+                "image_quality_score": 0.5,
+                "input_tokens": None, 
+                "output_tokens": None
+            }
         except Exception as e:
             return self._error_response("biomedclip", str(e))
 
@@ -305,9 +322,7 @@ class VisionClient:
             }
         except json.JSONDecodeError as e:
             logger.error(f"❌ JSON parse failed: {e}")
-            return {"structured_findings": None, "narrative_analysis": response, "model": provider,
-                    "detailed_description": response, "pathology_summary": "Unable to parse structured output",
-                    "confidence_score": 0.3, "image_quality_score": 0.5}
+            raise RuntimeError(f"Vision model {provider} did not return valid JSON. Please try again so we get structured output.")
 
     def _format_narrative(self, data: Dict) -> str:
         parts = ["RADIOGRAPHIC ANALYSIS",

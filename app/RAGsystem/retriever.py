@@ -5,8 +5,8 @@ Retriever Factory - Fixed for all retriever types
 from langchain_chroma import Chroma
 from langchain_classic.retrievers import MultiQueryRetriever, ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors import LLMChainExtractor
-from langchain_ollama import ChatOllama, OllamaLLM
 from app.RAGsystem.embeddings import embedding_provider
+from app.RAGsystem.llm_providers import get_llm_by_provider
 from config.ragconfig import rag_settings
 import logging
 
@@ -69,10 +69,8 @@ class RetrieverFactory:
         """
         base_retriever = self.create_mmr_retriever(k=4, fetch_k=15, lambda_mult=0.5)
         
-        llm = ChatOllama(
-            model=llm_model or rag_settings.current_llm_model,
-            temperature=0.1
-        )
+        # Use provider-aware LLM
+        llm = get_llm_by_provider()
         
         logger.info("Creating multi-query retriever")
         multi_query = MultiQueryRetriever.from_llm(
@@ -86,7 +84,8 @@ class RetrieverFactory:
         """
         Uses LLM to filter irrelevant content from retrieved documents.
         """
-        llm = OllamaLLM(model=rag_settings.current_llm_model)
+        # Use provider-aware LLM
+        llm = get_llm_by_provider()
         compressor = LLMChainExtractor.from_llm(llm)
         
         base = base_retriever or self.create_mmr_retriever()
@@ -134,31 +133,3 @@ def get_retriever(persist_dir: str = None, strategy: str = None):
     """Convenience function for backward compatibility."""
     factory = RetrieverFactory(persist_dir)
     return factory.get_retriever(strategy)
-
-
-
-# from langchain_chroma import Chroma
-# from langchain_ollama import OllamaEmbeddings
-
-
-# def get_retriever(persist_dir: str = "chroma_db"):
-
-#     # Retrieving chunks from Chroma DB
-#     # 1. Using Ollama embedding models
-#     embeddings = OllamaEmbeddings(model="mxbai-embed-large")
-#     vectorstore = Chroma(persist_directory=persist_dir, embedding_function=embeddings)
-
-#     # 2. Using HuggingFace embedding models
-#     # embeddings = HuggingFaceEmbeddings(model_name=rag_settings.EMBEDDING_MODEL, model_kwargs={"device": rag_settings.EMBEDDING_DEVICE}, encode_kwargs={'normalize_embeddings': True})
-#     # vectorstore = Chroma(
-#     #     persist_directory=persist_dir,
-#     #     embedding_function=embeddings
-#     # )
-
-#     retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 6})
-#     # retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 6})
-#     # retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 6, "fetch_k": 10,})
-#     # retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 8, "fetch_k": 10, "lambda_mult": 0.5})
-#     # retriever = vectorstore.as_retriever(search_type="similarity_score_threshold", search_kwargs={"k": 8, "score_threshold": 0.8})
-
-#     return retriever

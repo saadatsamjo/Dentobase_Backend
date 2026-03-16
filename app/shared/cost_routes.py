@@ -77,7 +77,7 @@ async def get_pipeline_cost_estimate(
     
     Example scenarios:
     - Ultra-low cost: vision_model=gemma3:4b, llm_model=gemma3:4b
-    - Best value: vision_model=gemini-2.0-flash-exp, llm_model=gemini-2.0-flash-exp
+    - Best value: vision_model=gemini-2.5-flash, llm_model=gemini-2.5-flash
     - Ultra-fast: vision_model=llama-3.2-11b-vision-preview, llm_model=llama-3.3-70b-versatile
     - Best accuracy: vision_model=gpt-4o, llm_model=gpt-4o
     
@@ -159,7 +159,7 @@ async def get_cost_recommendations():
         },
         "hybrid_recommended": {
             "vision": "gemma3:4b",
-            "llm": "gemini-2.0-flash-exp",
+            "llm": "gemini-2.5-flash",
             "description": "Local vision + cloud LLM (recommended for Tanzania)",
             "cost_per_case": "$0.0003",
             "annual_cost_50_daily": "$5.48",
@@ -198,10 +198,10 @@ async def get_tanzania_deployment_analysis():
     rural_scenario = estimate_cdss_pipeline_cost("gemma3:4b", "gemma3:4b", 20 * 365)
     
     # Scenario 2: District hospital (semi-connected, 50 cases/day)
-    district_scenario = estimate_cdss_pipeline_cost("gemma3:4b", "gemini-2.0-flash-exp", 50 * 365)
+    district_scenario = estimate_cdss_pipeline_cost("gemma3:4b", "gemini-2.5-flash", 50 * 365)
     
     # Scenario 3: Urban hospital (connected, 100 cases/day)
-    urban_scenario = estimate_cdss_pipeline_cost("gemini-2.0-flash-exp", "gemini-2.0-flash-exp", 100 * 365)
+    urban_scenario = estimate_cdss_pipeline_cost("gemini-2.5-flash", "gemini-2.5-flash", 100 * 365)
     
     return {
         "context": {

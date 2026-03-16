@@ -83,16 +83,16 @@ class ClaudeVisionClient:
     
     def _get_client(self):
         if self._client is None:
-            api_key = os.getenv("CLAUDE_API_KEY")
+            # Try vision settings first, then fall back to environment variables
+            api_key = vision_settings.ANTHROPIC_API_KEY or os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
             if not api_key:
-                raise ValueError("CLAUDE_API_KEY not found in environment")
+                raise ValueError("Anthropic API key not found. Please set ANTHROPIC_API_KEY in .env")
             self._client = Anthropic(api_key=api_key)
         return self._client
     
     def _get_model_name(self):
-        """Get Claude model from RAG settings."""
-        from config.ragconfig import rag_settings
-        return rag_settings.CLAUDE_LLM_MODEL
+        """Get Claude model from vision settings."""
+        return vision_settings.CLAUDE_VISION_MODEL
     
     def _encode_image(self, image: Image.Image) -> str:
         """Convert PIL Image to base64."""

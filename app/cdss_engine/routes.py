@@ -21,7 +21,7 @@ async def provide_final_recommendation(
     patient_id: int = Form(..., description="Patient database ID"),
     chief_complaint: str = Form(..., description="Main clinical complaint/question"),
     tooth_number: Optional[str] = Form(None, description="Tooth number(s) affected (e.g., '36' or '36,37')"),
-    image: Optional[UploadFile] = File(None, description="Dental radiograph (optional)"),
+    image: UploadFile = File(..., description="Dental radiograph (REQUIRED)"),
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id)
 ):
@@ -30,7 +30,7 @@ async def provide_final_recommendation(
     
     This endpoint orchestrates:
     1. Fetch patient history from database
-    2. Analyze radiograph (if provided) with configured vision model
+    2. Analyze radiograph (REQUIRED) with configured vision model
     3. Retrieve relevant clinical guidelines (RAG)
     4. Generate structured clinical recommendation with configured LLM
     
@@ -38,7 +38,7 @@ async def provide_final_recommendation(
     - **patient_id**: Patient database ID (required)
     - **chief_complaint**: Main complaint or clinical question (required)
     - **tooth_number**: Tooth number(s) affected (optional, e.g., '36' or '36,37')
-    - **image**: Dental periapical radiograph (optional, JPEG/PNG)
+    - **image**: Dental periapical radiograph (REQUIRED, JPEG/PNG)
     
     **Configuration:**
     - Vision Model: Set in config/visionconfig.py (VISION_MODEL_PROVIDER)
@@ -69,16 +69,21 @@ async def provide_final_recommendation(
     ```
     """
     try:
+        # Validate that image is provided and not empty
+        if not image or image.size == 0:
+            raise HTTPException(
+                status_code=400, 
+                detail="Radiograph image is REQUIRED for this analysis."
+            )
+
         # Parse tooth numbers if provided
         tooth_numbers = None
         if tooth_number:
             # Support comma-separated tooth numbers
             tooth_numbers = [t.strip() for t in tooth_number.split(',')]
         
-        # Read image if provided
-        image_bytes = None
-        if image:
-            image_bytes = await image.read()
+        # Read image
+        image_bytes = await image.read()
         
         # Execute CDSS pipeline
         result = await cdss_engine.provide_final_recommendation(
@@ -86,12 +91,14 @@ async def provide_final_recommendation(
             chief_complaint=chief_complaint,
             db=db,
             image_bytes=image_bytes,
-            tooth_numbers=tooth_numbers,  # NEW PARAMETER
+            tooth_numbers=tooth_numbers,
             user_id=user_id
         )
         
         return result
         
+    except HTTPException:
+        raise
     except ValueError as e:
         # Patient not found or validation error
         raise HTTPException(status_code=404, detail=str(e))
@@ -102,7 +109,7 @@ async def provide_final_recommendation(
             detail=f"CDSS processing error: {str(e)}"
         )
 
-@router.post("/recommendation_json", response_model=CDSSResponse)
+@router.post("/recommendation_without_radiograph", response_model=CDSSResponse)
 async def recommendation_from_json(
     request: CDSSRequest,
     db: AsyncSession = Depends(get_db),

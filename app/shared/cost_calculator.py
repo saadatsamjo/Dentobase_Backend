@@ -25,22 +25,28 @@ class ModelPricing:
 VISION_MODEL_PRICING = {
     # Premium Cloud (Proprietary)
     "gpt-4o": ModelPricing(2.50, 10.00, "Best accuracy, expensive"),
+    "gpt4v": ModelPricing(2.50, 10.00, "Alias for GPT-4o"),
     "gpt-4-vision-preview": ModelPricing(10.00, 30.00, "Legacy model"),
     "claude-3-5-sonnet-20241022": ModelPricing(3.00, 15.00, "Excellent reasoning"),
+    "claude": ModelPricing(3.00, 15.00, "Alias for Claude 3.5 Sonnet"),
     "claude-3-opus-20240229": ModelPricing(15.00, 75.00, "Highest capability"),
     
     # Fast Cloud (New additions)
     "llama-3.2-90b-vision-preview": ModelPricing(0.59, 0.79, "Groq - ultra-fast"),
     "llama-3.2-11b-vision-preview": ModelPricing(0.18, 0.18, "Groq - faster, cheaper"),
-    "gemini-2.0-flash-exp": ModelPricing(0.075, 0.30, "Google - best value"),
+    "groq": ModelPricing(0.18, 0.18, "Alias for Groq Llama 3.2"),
+    "gemini-2.5-flash": ModelPricing(0.075, 0.30, "Google - best value"),
+    "gemini": ModelPricing(0.075, 0.30, "Alias for Gemini 2.5 Flash"),
     "gemini-1.5-pro": ModelPricing(1.25, 5.00, "Google - high capability"),
     "gemini-1.5-flash": ModelPricing(0.075, 0.30, "Google - fast"),
     
     # Local Models (Free)
     "llava:13b": ModelPricing(0.00, 0.00, "Local Ollama - best open-source"),
+    "llava_med": ModelPricing(0.00, 0.00, "Local Ollama - medical specialist"),
     "llama3.2-vision": ModelPricing(0.00, 0.00, "Local Ollama - Meta latest"),
     "gemma3:12b": ModelPricing(0.00, 0.00, "Local Ollama - Google multimodal"),
     "gemma3:4b": ModelPricing(0.00, 0.00, "Local Ollama - lightweight"),
+    "gemma3": ModelPricing(0.00, 0.00, "Local Ollama - gemma3 alias"),
     "biomedclip": ModelPricing(0.00, 0.00, "Local - pathology classifier"),
 }
 
@@ -53,8 +59,10 @@ LLM_MODEL_PRICING = {
     
     # Cloud - Fast/Cheap (New)
     "llama-3.3-70b-versatile": ModelPricing(0.59, 0.79, "Groq - 70B fast"),
+    "groq": ModelPricing(0.59, 0.79, "Alias for Groq Llama 3.3"),
     "mixtral-8x7b-32768": ModelPricing(0.24, 0.24, "Groq - MoE model"),
-    "gemini-2.0-flash-exp": ModelPricing(0.075, 0.30, "Google - best value"),
+    "gemini-2.5-flash": ModelPricing(0.075, 0.30, "Google - best value"),
+    "gemini": ModelPricing(0.075, 0.30, "Alias for Gemini 2.5 Flash"),
     "gemini-1.5-pro": ModelPricing(1.25, 5.00, "Google - 2M context"),
     
     # Local - Free
@@ -243,8 +251,8 @@ def get_cheapest_options() -> Dict[str, str]:
         "cheapest_llm_cloud": cheapest_llm_cloud,
         "cheapest_vision_local": "gemma3:4b",  # Smallest local multimodal
         "cheapest_llm_local": "gemma3:4b",     # Smallest local LLM
-        "best_value_vision": "gemini-2.0-flash-exp",  # Best accuracy/cost ratio
-        "best_value_llm": "gemini-2.0-flash-exp",
+        "best_value_vision": "gemini-2.5-flash",  # Best accuracy/cost ratio
+        "best_value_llm": "gemini-2.5-flash",     # Best accuracy/cost ratio
         "fastest_vision": "llama-3.2-11b-vision-preview",  # Groq 11B
         "fastest_llm": "llama-3.3-70b-versatile",  # Groq 70B
     }

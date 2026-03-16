@@ -40,8 +40,8 @@ class LlavaMedClient:
         return cls._instance
 
     def _get_model_name(self) -> str:
-        """ Return the current LLM model name """
-        return rag_settings.current_llm_model
+        """ Return the current vision model name for Ollama routing """
+        return vision_settings.LLAVA_MODEL
 
     def analyze_image(self, image: Image.Image, prompt: str) -> dict:
         """

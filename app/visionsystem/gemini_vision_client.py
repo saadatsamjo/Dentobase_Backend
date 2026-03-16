@@ -51,6 +51,19 @@ class GeminiVisionClient:
         except Exception as e:
             logger.error(f"❌ Gemini failed: {e}")
 
+    def get_model_info(self) -> dict:
+        """Get model metadata for health checks"""
+        from config.visionconfig import vision_settings
+        self._lazy_load_client()
+        
+        return {
+            "provider": "gemini",
+            "model": self._model_id or vision_settings.GEMINI_VISION_MODEL,
+            "status": "ready" if self._client else "error",
+            "api_type": "google.genai",
+            "reliable": True if self._client else False
+        }
+
     def analyze_image(self, image: Image.Image, prompt: str) -> dict:
         """Analyze with NEW SDK"""
         from config.visionconfig import vision_settings
@@ -75,6 +88,9 @@ class GeminiVisionClient:
             response = self._client.models.generate_content(
                 model=self._model_id,
                 contents=[prompt, {"inline_data": {"mime_type": "image/png", "data": img_base64}}],
+                config={
+                    "response_mime_type": "application/json",
+                }
             )
 
             result = response.text

@@ -202,7 +202,7 @@ Open your browser:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/cdss/provide_final_recommendation` | POST | Complete CDSS pipeline (vision + RAG) |
-| `/api/cdss/recommendation_json` | POST | Generate recommendation from existing findings |
+| `/api/cdss/recommendation_without_radiograph` | POST | Generate recommendation from existing findings |
 | `/api/cdss/systemconfig` | GET | System health check |
 
 **CDSS Pipeline:**

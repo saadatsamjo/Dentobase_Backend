@@ -53,10 +53,23 @@ async def answer_question_endpoint(payload: QuestionPayload):
         
         # Parse JSON
         try:
-            parsed_data = json.loads(raw_answer)
+            # Robust JSON cleaning
+            cleaned = raw_answer.strip()
+            # Remove markdown code blocks if present
+            if cleaned.startswith("```"):
+                # Handle ```json or just ```
+                lines = cleaned.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                cleaned = "\n".join(lines).strip()
+            
+            parsed_data = json.loads(cleaned)
             logger.info("✅ Parsed LLM response as JSON")
         except json.JSONDecodeError as e:
             logger.error(f"❌ LLM returned invalid JSON: {e}")
+            logger.error(f"   Raw response head: {raw_answer[:100]}...")
             raise HTTPException(
                 status_code=500,
                 detail="LLM did not return valid JSON. Please try again or contact support."
@@ -72,7 +85,9 @@ async def answer_question_endpoint(payload: QuestionPayload):
         
         return RAGResponse(
             answer=normalized_data,
-            retrieval_strategy=rag_settings.RETRIEVER_TYPE
+            retrieval_strategy=rag_settings.RETRIEVER_TYPE,
+            llm_provider=rag_settings.LLM_PROVIDER,
+            model_used=rag_settings.current_llm_model
         )
     
     except HTTPException:
